@@ -1,2 +1,3 @@
-# flow-transformer
-Simple RFT implementation
+# Rectified Flow Architecture Search
+
+This repository is my attempt to do an extensive sweep of different hparams, archs, etc. to see how things effect training for a rectified flow transformer model. I won't be training very long and will mainly just report large differences in loss. This isn't ideal a lot of the time but is useful when optimizing for speed or figuring out where things should go.

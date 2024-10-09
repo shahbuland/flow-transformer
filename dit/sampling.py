@@ -35,7 +35,7 @@ class Sampler:
 
         if c is not None:
             c = c.to(device=device, dtype=dtype)
-            
+
         for i, t in enumerate(timesteps):
             dt = sigmas[i+1] - sigmas[i]
             pred = model.denoise(noisy, t, c)
@@ -45,6 +45,61 @@ class Sampler:
             return noisy
         else:
             return model.vae.decode(noisy)
+
+
+class CFGSampler:
+    def __init__(self):
+        self.scheduler = FlowMatchEulerDiscreteScheduler(shift=3)
+
+    @torch.no_grad()
+    def sample(self, n_samples, model, prompts, n_steps=40, guidance_scale=1.5):
+        assert prompts is not None, "Prompts cannot be None for CFGSampler"
+        assert len(prompts) == n_samples, "Number of prompts must match number of samples"
+
+        # 1. Double the prompts, adding empty strings
+        prompts = prompts + [""] * len(prompts)
+        c = model.encode_text(prompts)
+            
+        sample_shape = (model.config.channels, model.config.sample_size, model.config.sample_size)
+        sample_shape = (n_samples,) + sample_shape
+        self.scheduler.set_timesteps(n_steps)
+
+        timesteps = self.scheduler.timesteps / 1000
+        sigmas = self.scheduler.sigmas
+
+        noisy = torch.randn(*sample_shape)
+
+        device = next(model.parameters()).device
+        dtype = next(model.parameters()).dtype
+
+        noisy = noisy.to(device=device, dtype=dtype)
+        timesteps = timesteps.to(device=device, dtype=dtype)
+        sigmas = sigmas.to(device=device, dtype=dtype)
+        c = c.to(device=device, dtype=dtype)
+
+        for i, t in enumerate(timesteps):
+            dt = sigmas[i+1] - sigmas[i]
+            
+            # 2. Double the noisy tensor along the batch dimension
+            noisy_doubled = torch.cat([noisy, noisy], dim=0)
+            
+            pred = model.denoise(noisy_doubled, t, c)
+            
+            # 3. Slice to get conditional and unconditional predictions
+            pred_cond, pred_uncond = pred.chunk(2)
+            
+            # 4. Calculate v
+            v = pred_uncond + guidance_scale * (pred_cond - pred_uncond)
+            
+            # 5. Update noisy
+            noisy += v * dt
+        
+        if model.vae is None:
+            return noisy
+        else:
+            return model.vae.decode(noisy)
+
+
 
 def to_wandb_image(x : TensorType["c", "h", "w"], caption : str = ""):
     """

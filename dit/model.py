@@ -68,7 +68,7 @@ class RectFlowTransformer(nn.Module):
         pass
         #truncated_normal_init(layer)
         #mimetic_init(layer.qkv, layer.out, config.n_heads)
-        
+
     truncated_normal_init(self.pos_enc)
   
   def encode_text(self, *args, **kwargs):
@@ -77,8 +77,13 @@ class RectFlowTransformer(nn.Module):
   def forward(self, x):
     if self.config.take_label:
       x, ctx = x # c is list str
+      if self.config.cfg_prob > 0:
+          mask = torch.rand(len(ctx)) < self.config.cfg_prob
+          ctx = [c if not m else "" for c, m in zip(ctx, mask)]
+          
       ctx = self.text_embedder.encode_text(ctx)
       ctx = ctx.to(x.dtype).to(x.device)
+      
     else:
       ctx = None
 

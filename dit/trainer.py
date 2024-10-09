@@ -8,7 +8,7 @@ from ema_pytorch import EMA
 
 from .configs import TrainConfig, LoggingConfig, ModelConfig
 from .utils import get_scheduler_cls, Stopwatch
-from .sampling import Sampler, to_wandb_batch
+from .sampling import Sampler, CFGSampler, to_wandb_batch
 
 class Trainer:
     def __init__(self, config : TrainConfig, logging_config : LoggingConfig = None, model_config : ModelConfig = None):
@@ -83,7 +83,11 @@ class Trainer:
 
         sw = Stopwatch()
         sw.reset()
-        sampler = Sampler()
+
+        if self.model_config.cfg_prob > 0.0:
+            sampler = CFGSampler()
+        else:
+            sampler = Sampler()
         
         for epoch in range(self.config.epochs):
             for i, batch in enumerate(loader):

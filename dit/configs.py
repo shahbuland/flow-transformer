@@ -12,6 +12,7 @@ class ModelConfig:
     patch_size : int = 4
     use_vae = False
     flash : bool = False
+    take_label : bool = True # Take the batch as (pixel_values, label_str) instead of pixel_values
 
 @dataclass
 class TrainConfig:
@@ -38,11 +39,12 @@ class TrainConfig:
     log_interval : int = 1
     sample_interval : int = 50
     n_samples : int = 4 # Number of samples to log each time (too many gets crowded)
-
+    sample_prompts = [f"A drawing of the digit {i}" for i in ["one", "two", "three", "four"]]
     grad_clip : float = -1 # Clip grad norms to this value
+    
 
 @dataclass
 class LoggingConfig:
-    run_name : str = "small mscoco (+cot)"
+    run_name : str = "mnist tiny (+cond)"
     wandb_entity : str = "shahbuland"
     wandb_project : str = "mnist_sanity"

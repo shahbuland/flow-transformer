@@ -9,7 +9,12 @@ class Sampler:
         self.scheduler = FlowMatchEulerDiscreteScheduler(shift=3)
 
     @torch.no_grad()
-    def sample(self, n_samples, model, n_steps = 40):
+    def sample(self, n_samples, model, prompts = None, n_steps = 40):
+        c = None
+        if prompts is not None:
+            assert len(prompts) == n_samples
+            c = model.encode_text(prompts)
+            
         sample_shape = (model.config.channels, model.config.sample_size, model.config.sample_size)
         sample_shape = (n_samples,) + sample_shape
         self.scheduler.set_timesteps(n_steps)
@@ -28,9 +33,12 @@ class Sampler:
         timesteps = timesteps.to(device=device, dtype=dtype)
         sigmas = sigmas.to(device=device, dtype=dtype)
 
+        if c is not None:
+            c = c.to(device=device, dtype=dtype)
+            
         for i, t in enumerate(timesteps):
             dt = sigmas[i+1] - sigmas[i]
-            pred = model.denoise(noisy, t)
+            pred = model.denoise(noisy, t, c)
             noisy += pred * dt
         
         if model.vae is None:

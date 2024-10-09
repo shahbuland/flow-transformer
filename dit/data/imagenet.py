@@ -24,6 +24,7 @@ class CustomImageNetDataset(Dataset):
 
     def __getitem__(self, idx):
         image = self.dataset[idx]['image']
+        label = self.dataset[idx]['label']
         if self.transform:
             image = self.transform(image)
-        return image
+        return image, label

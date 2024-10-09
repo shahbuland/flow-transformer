@@ -5,7 +5,6 @@ from accelerate import Accelerator
 import os
 from dataclasses import asdict
 from ema_pytorch import EMA
-import torch_optimizer as optim
 
 from .configs import TrainConfig, LoggingConfig, ModelConfig
 from .utils import get_scheduler_cls, Stopwatch
@@ -15,6 +14,7 @@ class Trainer:
     def __init__(self, config : TrainConfig, logging_config : LoggingConfig = None, model_config : ModelConfig = None):
         self.config = config
         self.logging_config = logging_config
+        self.model_config = model_config
 
         self.accum_steps = self.config.target_batch_size // self.config.batch_size
         self.accelerator = Accelerator(
@@ -55,7 +55,7 @@ class Trainer:
         }
 
     def train(self, model, loader):
-        opt_class = getattr(optim, self.config.opt)
+        opt_class = getattr(torch.optim, self.config.opt)
         opt = opt_class(model.parameters(), **self.config.opt_kwargs)
 
         if self.logging_config is not None:
@@ -112,7 +112,7 @@ class Trainer:
                             wandb_dict["learning_rate"] = scheduler.get_last_lr()[0]
                         if should['sample']:
                             n_samples = self.config.n_samples
-                            images = to_wandb_batch(sampler.sample(n_samples, ema))
+                            images = to_wandb_batch(sampler.sample(n_samples, ema.ema_model, self.config.sample_prompts))
                             wandb_dict.update({
                                 "samples": images
                             })

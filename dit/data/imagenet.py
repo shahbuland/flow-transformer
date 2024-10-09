@@ -7,7 +7,7 @@ from PIL import Image
 # Define the transforms
 def get_transform(image_size):
     return transforms.Compose([
-        transforms.RandomResizedCrop(image_size),
+        transforms.Resize((image_size, image_size)),
         transforms.RandomHorizontalFlip(),
         transforms.Lambda(lambda img: img.convert('RGB')),  # Convert to RGB
         transforms.ToTensor(),
@@ -24,7 +24,6 @@ class CustomImageNetDataset(Dataset):
 
     def __getitem__(self, idx):
         image = self.dataset[idx]['image']
-        label = self.dataset[idx]['label']
         if self.transform:
             image = self.transform(image)
-        return image, label
+        return image

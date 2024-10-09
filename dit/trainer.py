@@ -98,13 +98,16 @@ class Trainer:
 
                     if self.accelerator.sync_gradients:
                         if self.config.grad_clip > 0: self.accelerator.clip_grad_norm_(model.parameters(), self.config.grad_clip)
-                        self.total_step_counter += 1
-                        ema.update()
 
                     opt.step()
                     if scheduler:
                         scheduler.step()
                     opt.zero_grad()
+
+                    if self.accelerator.sync_gradients:
+                        self.total_step_counter += 1
+                        self.accelerator.unwrap_model(model).normalize()
+                        ema.update()
 
                     should = self.get_should()
                     if self.logging_config is not None and should['log'] or should['sample']:

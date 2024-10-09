@@ -18,3 +18,12 @@ class RMSNorm(nn.Module):
         x = x * gain
 
         return x
+
+class Norm(nn.Module):
+    def __init__(self, eps = 1.0e-6):
+        super().__init__()
+        self.eps = eps
+    
+    def forward(self, x):
+        rss = (x.float().pow(2).sum(-1, keepdim = True) + self.eps).rsqrt()
+        return x * rss

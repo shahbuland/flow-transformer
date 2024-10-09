@@ -9,7 +9,7 @@ class MLP(nn.Module):
   this model essentially processes each word individually,
   i.e. information flow from input to output is only within words, not between them
   """
-  def __init__(self, dim, dim_out = None):
+  def __init__(self, dim, dim_out = None, use_scale = True):
     super().__init__()
     if dim_out is None:
       dim_out = dim
@@ -18,8 +18,13 @@ class MLP(nn.Module):
     self.act = nn.GELU()
     self.fc2 = nn.Linear(4 * dim, dim_out)
 
+    if use_scale:
+        self.scale = nn.Parameter(torch.ones(4*dim))
+    self.use_scale = use_scale
+
   def forward(self, x):
-    x = self.fc1(x)
+    x = self.fc1(x) 
+    if self.use_scale: x *= self.scale[None,None,:]
     x = self.act(x)
     x = self.fc2(x)
     return x

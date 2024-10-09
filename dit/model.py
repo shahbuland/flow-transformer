@@ -15,6 +15,7 @@ from .nn.embeddings import TimestepEmbedding, AbsEmbedding
 from .nn.modulation import SimpleModulation
 from .nn.transformers import DiTBlock
 from .nn.text_embedder import TextEmbedder
+from .nn.normalization import Norm
 
 class RectFlowTransformer(nn.Module):
   def __init__(self, config: ModelConfig = ModelConfig()):
@@ -70,9 +71,20 @@ class RectFlowTransformer(nn.Module):
         #mimetic_init(layer.qkv, layer.out, config.n_heads)
 
     truncated_normal_init(self.pos_enc)
+    self.norm = Norm()
   
   def encode_text(self, *args, **kwargs):
     return self.text_embedder.encode_text(*args, **kwargs)
+  
+  def normalize(self):
+    def normalize_outdim(data):
+        return self.norm(data.transpose(0,1)).transpose(0,1)
+
+    self.proj_in.weight.data = normalize_outdim(self.proj_in.weight)
+    self.proj_out.weight.data = normalize_outdim(self.proj_out.weight)
+
+    for layer in self.layers:
+      layer.normalize()
 
   def forward(self, x):
     if self.config.take_label:
@@ -80,7 +92,7 @@ class RectFlowTransformer(nn.Module):
       if self.config.cfg_prob > 0:
           mask = torch.rand(len(ctx)) < self.config.cfg_prob
           ctx = [c if not m else "" for c, m in zip(ctx, mask)]
-          
+
       ctx = self.text_embedder.encode_text(ctx)
       ctx = ctx.to(x.dtype).to(x.device)
       
@@ -115,7 +127,6 @@ class RectFlowTransformer(nn.Module):
     x = self.proj_in(x)
 
     t_emb = self.t_embedder(t)
-    
     for layer in self.layers:
       x = layer(x, t_emb, c)
 

@@ -85,7 +85,7 @@ class TimestepEmbedding(nn.Module):
     def __init__(self, d_out, d_in = 512):
         super().__init__()
 
-        self.mlp = MLP(d_in, d_out)
+        self.mlp = MLP(d_in, d_out, use_scale = False)
         self.d = d_in # Assume this is even
 
     def forward(self, t):

@@ -13,12 +13,13 @@ class ModelConfig:
     use_vae = False
     flash : bool = False
     take_label : bool = True # Take the batch as (pixel_values, label_str) instead of pixel_values
+    cfg_prob : float = 0.1
 
 @dataclass
 class TrainConfig:
     dataset : str = "mnist"
     target_batch_size : int = 64
-    batch_size : int = 16
+    batch_size : int = 32
     epochs : int = 100
     # optimizer
     opt : str = "AdamW"
@@ -29,7 +30,7 @@ class TrainConfig:
     })
 
     # scheduler
-    scheduler: Optional[str] = "CosineDecayAfterWarmup"
+    scheduler: Optional[str] = None#"CosineDecayAfterWarmup"
     scheduler_kwargs: Dict = field(default_factory=lambda: {
         "warmup_steps": 400,  # Linear warmup over 1000 steps
         "T_max" : 1000000,
@@ -45,6 +46,6 @@ class TrainConfig:
 
 @dataclass
 class LoggingConfig:
-    run_name : str = "mnist tiny (+cond)"
+    run_name : str = "mnist tiny (+cfg)"
     wandb_entity : str = "shahbuland"
     wandb_project : str = "mnist_sanity"

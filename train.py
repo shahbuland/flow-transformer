@@ -2,7 +2,7 @@ from PIL import Image
 
 import torch
 from dit.data import create_loader
-from dit.nn import RectFlowTransformer
+from dit.model import RectFlowTransformer
 from dit.trainer import Trainer
 from dit.configs import ModelConfig, TrainConfig, LoggingConfig
 from dit.utils import pretty_print_parameters

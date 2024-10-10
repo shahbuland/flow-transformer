@@ -27,3 +27,5 @@ class Norm(nn.Module):
     def forward(self, x):
         rss = (x.float().pow(2).sum(-1, keepdim = True) + self.eps).rsqrt()
         return x * rss
+    
+LayerNorm = lambda dim: nn.LayerNorm(dim, elementwise_affine = False, eps = 1.0e-6)

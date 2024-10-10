@@ -3,7 +3,7 @@ import torch
 from torch import nn
 import einops as eo
 
-from .normalization import RMSNorm, Norm
+from .normalization import RMSNorm, Norm, LayerNorm
 from .modulation import DoubleModBlock, SimpleModulation
 from .embeddings import RoPEEmbedding, RoPE2D
 from .mlp import MLP
@@ -31,7 +31,7 @@ class MultiHeadAttention(nn.Module):
         super().__init__()
 
         self.n_heads = n_heads
-        self.scale = (dim // n_heads) ** .5
+        self.scale = (dim // n_heads) ** .5 # NGPT -> Not divided
 
     def forward(self, q, k, v):
         # [b, h, n, d] for all 3
@@ -56,6 +56,8 @@ class Attn(nn.Module):
             self.cross_k_norm = RMSNorm(d_model // n_heads)
 
         self.norm = Norm()
+        #self.q_norm = RMSNorm(d_model // n_heads)
+        #self.k_norm = RMSNorm(d_model // n_heads)
 
         self.scale_init = 1
         self.scale_scale = d_model ** -.5
@@ -101,6 +103,9 @@ class Attn(nn.Module):
 
         q = self.norm(q) * scaler
         k = self.norm(k) * scaler
+        
+        #q = self.q_norm(q)
+        #k = self.k_norm(k)
 
         if self.cross:
             cross_qkv = self.cross_qkv(c)
@@ -108,6 +113,9 @@ class Attn(nn.Module):
             cross_scaler = self.get_cross_scale()
             c_q = self.norm(c_q) * cross_scaler
             c_k = self.norm(c_k) * cross_scaler
+            
+            #c_q = self.cross_q_norm(c_q)
+            #c_k = self.cross_k_norm(c_k)
 
             # note flash is [b n h d], otherwise [b h n d]
             if self.flash:
@@ -152,6 +160,9 @@ class DiTBlock(nn.Module):
 
     self.norm = Norm()
 
+    #self.norm_1 = LayerNorm(d_model)
+    #self.norm_2 = LayerNorm(d_model)
+
     self.alpha_init = 1 / config.n_layers  # In the order of 1/n_layers
     self.alpha_scale = 1 / (d_model ** 0.5)
     
@@ -181,20 +192,35 @@ class DiTBlock(nn.Module):
     mod1, mod2 = self.mod(t_emb)
 
     resid_1 = x.clone() # h
-    x = self.norm(mod1.first_step(x))
+    
+    #x = self.norm_1(x)
+    #x = mod1.first_step(x)
+    
+    x = self.norm(mod1.first_step(self.norm(x)))
+    #x = mod1.first_step(x)
 
     if self.cross:
         attn_out = self.attn(x, c)
     else:
         attn_out = self.attn(x)
-    attn_out = self.norm(mod1.second_step(attn_out)) # h_A
+    
+
+    attn_out = self.norm(mod1.second_step(self.norm(attn_out))) # h_A
+    #attn_out = mod1.second_step(attn_out)
 
     x = self.norm(resid_1 + self.get_alpha_attn() * (attn_out - resid_1))
+    #x = resid_1 + mod1.second_step(attn_out)
+
     resid_2 = x.clone()
 
-    x = self.norm(mod2.first_step(x))
+    x = self.norm(mod2.first_step(self.norm(x)))
+    #x = mod2.first_step(self.norm_2(x))
+    
     x = self.mlp(x)
+
     x = self.norm(mod2.second_step(x)) # h_M
+    #x = mod2.second_step(x)
 
     x = self.norm(resid_2 + self.get_alpha_mlp() * (x - resid_2))
+    #x = resid_2 + x
     return x

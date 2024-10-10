@@ -24,5 +24,6 @@ def create_loader(dataset_name, batch_size, image_size, deterministic=False):
         dataset,
         batch_size=batch_size,
         shuffle=True,
-        generator=generator
+        generator=generator,
+        pin_memory = True
     )

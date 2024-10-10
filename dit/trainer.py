@@ -58,9 +58,6 @@ class Trainer:
         opt_class = getattr(torch.optim, self.config.opt)
         opt = opt_class(model.parameters(), **self.config.opt_kwargs)
 
-        if self.logging_config is not None:
-            wandb.watch(model)
-
         scheduler = None
         if self.config.scheduler is not None:
             try:
@@ -78,11 +75,14 @@ class Trainer:
             self.accelerator.unwrap_model(model),
             beta = 0.9999,
             update_after_step = 100,
-            update_every = 4
+            update_every = 1
         )
 
         sw = Stopwatch()
         sw.reset()
+
+        if self.logging_config is not None:
+            wandb.watch(self.accelerator.unwrap_model(model), log = 'all')
 
         if self.model_config.cfg_prob > 0.0:
             sampler = CFGSampler()
@@ -92,7 +92,7 @@ class Trainer:
         for epoch in range(self.config.epochs):
             for i, batch in enumerate(loader):
                 with self.accelerator.accumulate(model):
-                    loss = model(batch)
+                    loss, extra = model(batch)
                     
                     self.accelerator.backward(loss)
 
@@ -106,7 +106,7 @@ class Trainer:
 
                     if self.accelerator.sync_gradients:
                         self.total_step_counter += 1
-                        self.accelerator.unwrap_model(model).normalize()
+                        if self.total_step_counter % self.config.normalize_every == 0: self.accelerator.unwrap_model(model).normalize()
                         ema.update()
 
                     should = self.get_should()
@@ -114,6 +114,9 @@ class Trainer:
                         wandb_dict = {
                             "loss": loss.item(),
                             "time_per_1k" : sw.hit(self.config.target_batch_size),
+                            "last_hidden_min": extra['last_hidden'].min(),
+                            "last_hidden_max": extra['last_hidden'].max(),
+                            "last_hidden_mean": extra['last_hidden'].mean()
                         }
                         if scheduler:
                             wandb_dict["learning_rate"] = scheduler.get_last_lr()[0]

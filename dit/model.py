@@ -15,7 +15,7 @@ from .nn.embeddings import TimestepEmbedding, AbsEmbedding
 from .nn.modulation import SimpleModulation
 from .nn.transformers import DiTBlock
 from .nn.text_embedder import TextEmbedder
-from .nn.normalization import Norm
+from .nn.normalization import Norm, RMSNorm
 
 class RectFlowTransformer(nn.Module):
   def __init__(self, config: ModelConfig = ModelConfig()):
@@ -52,7 +52,9 @@ class RectFlowTransformer(nn.Module):
     self.proj_out = nn.Linear(d_model, patch_content)
     
     #self.final_norm = RMSNorm(d_model)
-    self.final_norm = nn.LayerNorm(d_model, elementwise_affine = False, eps = 1.0e-6)
+    #self.final_norm = nn.LayerNorm(d_model, elementwise_affine = False, eps = 1.0e-6)
+    self.final_norm  = Norm()
+
     self.final_mod = SimpleModulation(d_model)
 
     if self.config.take_label:
@@ -117,25 +119,30 @@ class RectFlowTransformer(nn.Module):
         lerpd = x * (1 - t_exp) + z * t_exp
         target = z-x # Velocity to predict
 
-    x = self.denoise(lerpd, t, ctx)
+    x, h = self.denoise(lerpd, t, ctx, output_hidden_states=True)
 
     loss = ((x - target) ** 2).mean()
-    return loss
+    return loss, {'last_hidden' : h[-2]}
 
-  def denoise(self, x, t, c = None):
+  def denoise(self, x, t, c = None, output_hidden_states = False):
     x = self.patchify(x)
     x = self.proj_in(x)
 
     t_emb = self.t_embedder(t)
+    h = []
     for layer in self.layers:
       x = layer(x, t_emb, c)
+      h.append(x)
 
     x = self.final_norm(x)
     x = self.final_mod(x, t_emb)
     x = self.proj_out(x)
     x = self.depatchify(x)
 
-    return x
+    if output_hidden_states:
+      return x,h
+    else:
+      return x
 
 
 if __name__ == "__main__":

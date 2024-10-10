@@ -3,7 +3,7 @@ from typing import Optional, Dict
 
 @dataclass
 class ModelConfig:
-    n_layers : int = 4
+    n_layers : int = 12
     n_heads : int = 6
     d_model : int = 384
     image_size : int = 64
@@ -26,7 +26,8 @@ class TrainConfig:
     opt_kwargs : Dict = field(default_factory = lambda : {
         "lr": 1.0e-4,
         "eps": 1e-7,
-        "betas" : (0.9, 0.96)
+        "betas" : (0.9, 0.96),
+        "weight_decay" : 0.0
     })
 
     # scheduler
@@ -42,10 +43,11 @@ class TrainConfig:
     n_samples : int = 4 # Number of samples to log each time (too many gets crowded)
     sample_prompts = [f"A drawing of the digit {i}" for i in ["one", "two", "three", "four"]]
     grad_clip : float = -1 # Clip grad norms to this value
+    normalize_every : int = 10
     
 
 @dataclass
 class LoggingConfig:
-    run_name : str = "mnist tiny (+cfg)"
+    run_name : str = "mnist 40M (+ngpt+more norms!)"
     wandb_entity : str = "shahbuland"
     wandb_project : str = "mnist_sanity"

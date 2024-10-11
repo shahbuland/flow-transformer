@@ -199,3 +199,10 @@ def normal_init(module: nn.Module, std: float = 0.02):
     """
     for p in module.parameters():
         nn.init.normal_(p, mean=0.0, std=std)
+
+# Optimizers stuff
+from .soap import SOAP
+
+def get_extra_optimizer(name):
+    if name.lower() == "soap":
+        return SOAP

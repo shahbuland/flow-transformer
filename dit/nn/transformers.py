@@ -52,8 +52,8 @@ class Attn(nn.Module):
 
         if cross:
             self.cross_qkv = nn.Linear(d_model, 3 * d_model, bias = False)
-            self.cross_q_norm = RMSNorm(d_model // n_heads)
-            self.cross_k_norm = RMSNorm(d_model // n_heads)
+            #self.cross_q_norm = RMSNorm(d_model // n_heads)
+            #self.cross_k_norm = RMSNorm(d_model // n_heads)
 
         self.norm = Norm()
         #self.q_norm = RMSNorm(d_model // n_heads)
@@ -71,6 +71,7 @@ class Attn(nn.Module):
 
         self.cross = cross
         self.flash = flash
+        self.attn_scale = (d_model // n_heads) ** .5
 
         if flash:
             from flash_attn import flash_attn_func
@@ -110,6 +111,7 @@ class Attn(nn.Module):
         if self.cross:
             cross_qkv = self.cross_qkv(c)
             c_q, c_k, c_v = [self.head_split(i) for i in contiguous_qkv_chunk(cross_qkv)]
+            
             cross_scaler = self.get_cross_scale()
             c_q = self.norm(c_q) * cross_scaler
             c_k = self.norm(c_k) * cross_scaler
@@ -131,7 +133,7 @@ class Attn(nn.Module):
 
         if self.flash:
             orig_dtype = q.dtype
-            attn_out = self.attn(q.half(), k.half(), v.half()).to(orig_dtype)
+            attn_out = self.attn(q.half(), k.half(), v.half(), softmax_scale = self.attn_scale).to(orig_dtype)
         else:
             attn_out = self.attn(q,k,v)
         
@@ -164,7 +166,7 @@ class DiTBlock(nn.Module):
     #self.norm_2 = LayerNorm(d_model)
 
     self.alpha_init = 1 / config.n_layers  # In the order of 1/n_layers
-    self.alpha_scale = 1 / (d_model ** 0.5)
+    self.alpha_scale = d_model ** -.5
     
     self.alpha_attn = nn.Parameter(torch.full((d_model,), self.alpha_scale))
     self.alpha_mlp = nn.Parameter(torch.full((d_model,), self.alpha_scale))
@@ -174,19 +176,6 @@ class DiTBlock(nn.Module):
 
   def get_alpha_mlp(self):
     return (self.alpha_mlp * (self.alpha_init / self.alpha_scale))[None,None,:]
-
-  def normalize(self):
-    def normalize_outdim(data):
-        return self.norm(data.transpose(0,1)).transpose(0,1)
-    # Normalize qkv and o
-    self.attn.qkv.weight.data = normalize_outdim(self.attn.qkv.weight)
-    if self.cross:
-        self.attn.cross_qkv.weight.data = normalize_outdim(self.attn.cross_qkv.weight)
-
-    self.attn.out.weight.data = normalize_outdim(self.attn.out.weight)
-    
-    self.mlp.fc1.weight.data = normalize_outdim(self.mlp.fc1.weight)
-    self.mlp.fc2.weight.data = normalize_outdim(self.mlp.fc2.weight)
 
   def forward(self, x : TensorType["b", "n", "d"], t_emb : TensorType["b", "d"], c = None):
     mod1, mod2 = self.mod(t_emb)

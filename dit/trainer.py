@@ -106,7 +106,7 @@ class Trainer:
 
                     if self.accelerator.sync_gradients:
                         self.total_step_counter += 1
-                        if self.total_step_counter % self.config.normalize_every == 0: self.accelerator.unwrap_model(model).normalize()
+                        self.accelerator.unwrap_model(model).normalize()
                         ema.update()
 
                     should = self.get_should()

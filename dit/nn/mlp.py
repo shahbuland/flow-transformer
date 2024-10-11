@@ -21,10 +21,11 @@ class MLP(nn.Module):
     if use_scale:
         self.scale = nn.Parameter(torch.zeros(4*dim))
     self.use_scale = use_scale
+    self.v_scale = dim ** .5
 
   def forward(self, x):
     x = self.fc1(x) 
-    if self.use_scale: x *= (1. + self.scale)[None,None,:]
+    if self.use_scale: x *= (1. + self.scale)[None,None,:] * self.v_scale
     x = self.act(x)
     x = self.fc2(x)
     return x

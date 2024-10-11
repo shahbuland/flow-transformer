@@ -7,7 +7,7 @@ from dataclasses import asdict
 from ema_pytorch import EMA
 
 from .configs import TrainConfig, LoggingConfig, ModelConfig
-from .utils import get_scheduler_cls, Stopwatch
+from .utils import get_scheduler_cls, Stopwatch, get_extra_optimizer
 from .sampling import Sampler, CFGSampler, to_wandb_batch
 
 class Trainer:
@@ -45,17 +45,41 @@ class Trainer:
         self.world_size = self.accelerator.state.num_processes
         self.total_step_counter = 0
 
+        self.ema = None
+
     def get_should(self, step = None):
         # Get a dict of bools that determines if certain things should be done at the current step
         if step is None:
             step = self.total_step_counter
         return {
             "log" : step % self.config.log_interval == 0 and self.accelerator.sync_gradients,
+            "save" : step % self.config.save_interval == 0 and self.accelerator.sync_gradients,
             "sample" : step % self.config.sample_interval == 0 and self.accelerator.sync_gradients
         }
 
+    def save(self, step = None, dir = None):
+        """
+        In directory, save checkpoint of accelerator state using step and self.logging_config.run_name
+        """
+        if step is None:
+            step = self.total_step_counter
+        if dir is None:
+            dir = os.path.join(self.config.checkpoint_root_dir, f"{self.logging_config.run_name}_{step}")
+        
+        os.makedirs(dir, exist_ok = True)
+
+        self.accelerator.save_state(output_dir = dir)
+        if self.ema is not None:
+            ema_path = os.path.join(dir, "ema_model.pth")
+            torch.save(self.ema.state_dict(), ema_path)
+            ema_model_path = os.path.join(dir, "out.pth")
+            torch.save(self.ema.ema_model.state_dict(), ema_model_path)
+
     def train(self, model, loader):
-        opt_class = getattr(torch.optim, self.config.opt)
+        try:
+            opt_class = getattr(torch.optim, self.config.opt)
+        except:
+            opt_class = get_extra_optimizer(self.config.opt)
         opt = opt_class(model.parameters(), **self.config.opt_kwargs)
 
         if self.logging_config is not None:
@@ -74,11 +98,11 @@ class Trainer:
         else:
             model, loader, opt = self.accelerator.prepare(model, loader, opt)
 
-        ema = EMA(
+        self.ema = EMA(
             self.accelerator.unwrap_model(model),
             beta = 0.9999,
             update_after_step = 100,
-            update_every = 4
+            update_every = 10
         )
 
         sw = Stopwatch()
@@ -99,7 +123,7 @@ class Trainer:
                     if self.accelerator.sync_gradients:
                         if self.config.grad_clip > 0: self.accelerator.clip_grad_norm_(model.parameters(), self.config.grad_clip)
                         self.total_step_counter += 1
-                        ema.update()
+                        self.ema.update()
 
                     opt.step()
                     if scheduler:
@@ -116,9 +140,11 @@ class Trainer:
                             wandb_dict["learning_rate"] = scheduler.get_last_lr()[0]
                         if should['sample']:
                             n_samples = self.config.n_samples
-                            images = to_wandb_batch(sampler.sample(n_samples, ema.ema_model, self.config.sample_prompts))
+                            images = to_wandb_batch(sampler.sample(n_samples, self.ema.ema_model, self.config.sample_prompts))
                             wandb_dict.update({
                                 "samples": images
                             })
                         wandb.log(wandb_dict)
                         sw.reset()
+                    if should['save']:
+                        self.save(self.total_step_counter)

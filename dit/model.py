@@ -15,7 +15,7 @@ from .nn.embeddings import TimestepEmbedding, AbsEmbedding
 from .nn.modulation import SimpleModulation
 from .nn.transformers import DiTBlock
 from .nn.text_embedder import TextEmbedder
-from .nn.normalization import Norm, RMSNorm
+from .nn.normalization import Norm, RMSNorm, norm_layer, norm_dit_block
 
 class RectFlowTransformer(nn.Module):
   def __init__(self, config: ModelConfig = ModelConfig()):
@@ -79,14 +79,10 @@ class RectFlowTransformer(nn.Module):
     return self.text_embedder.encode_text(*args, **kwargs)
   
   def normalize(self):
-    def normalize_outdim(data):
-        return self.norm(data.transpose(0,1)).transpose(0,1)
-
-    self.proj_in.weight.data = normalize_outdim(self.proj_in.weight)
-    self.proj_out.weight.data = normalize_outdim(self.proj_out.weight)
-
+    norm_layer(self.proj_in)
+    norm_layer(self.proj_out)
     for layer in self.layers:
-      layer.normalize()
+      norm_dit_block(layer)
 
   def forward(self, x):
     if self.config.take_label:

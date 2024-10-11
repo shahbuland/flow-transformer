@@ -19,12 +19,12 @@ class MLP(nn.Module):
     self.fc2 = nn.Linear(4 * dim, dim_out)
 
     if use_scale:
-        self.scale = nn.Parameter(torch.ones(4*dim))
+        self.scale = nn.Parameter(torch.zeros(4*dim))
     self.use_scale = use_scale
 
   def forward(self, x):
     x = self.fc1(x) 
-    if self.use_scale: x *= self.scale[None,None,:]
+    if self.use_scale: x *= (1. + self.scale)[None,None,:]
     x = self.act(x)
     x = self.fc2(x)
     return x

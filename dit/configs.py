@@ -19,12 +19,12 @@ class ModelConfig:
 class TrainConfig:
     dataset : str = "mnist"
     target_batch_size : int = 64
-    batch_size : int = 32
+    batch_size : int = 16
     epochs : int = 100
     # optimizer
     opt : str = "AdamW"
     opt_kwargs : Dict = field(default_factory = lambda : {
-        "lr": 1.0e-4,
+        "lr": 1.0e-3,
         "eps": 1e-7,
         "betas" : (0.9, 0.96),
         "weight_decay" : 0.0
@@ -40,14 +40,23 @@ class TrainConfig:
 
     log_interval : int = 1
     sample_interval : int = 50
-    n_samples : int = 4 # Number of samples to log each time (too many gets crowded)
-    sample_prompts = [f"A drawing of the digit {i}" for i in ["one", "two", "three", "four"]]
+    n_samples : int = 8 # Number of samples to log each time (too many gets crowded)
+    sample_prompts = [
+        "one",
+        "two",
+        "three",
+        "four",
+        "five",
+        "six",
+        "seven",
+        "eight"
+    ]
     grad_clip : float = -1 # Clip grad norms to this value
-    normalize_every : int = 10
+    normalize_every : int = 1
     
 
 @dataclass
 class LoggingConfig:
-    run_name : str = "mnist 40M (+ngpt+more norms!)"
+    run_name : str = "mnist 40M (+ngpt +1e-3 lr)"
     wandb_entity : str = "shahbuland"
     wandb_project : str = "mnist_sanity"

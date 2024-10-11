@@ -6,7 +6,7 @@ class VAE(nn.Module):
     def __init__(self, force_batch_size = 16):
         super().__init__()
 
-        self.model = AutoencoderTiny.from_pretrained("madebyollin/taef1", torch_dtype = torch.half)
+        self.model = AutoencoderTiny.from_pretrained("madebyollin/taesdxl")#taef1", torch_dtype = torch.half)
         self.model.cuda()
         self.model.half()
 

@@ -57,7 +57,10 @@ class CFGSampler:
         self.config = config
 
     @torch.no_grad()
-    def sample(self, n_samples, model, prompts):
+    def sample(self, n_samples = None, model = None, prompts = None):
+        if n_samples is None:
+            n_samples = len(prompts)
+            
         n_steps = self.config.n_steps
         guidance_scale = self.config.cfg_scale
 
@@ -82,11 +85,6 @@ class CFGSampler:
         device = next(model.parameters()).device
         dtype = next(model.parameters()).dtype
 
-        flip_back = False
-        if dtype == torch.float:
-            model.half()
-            dtype = torch.half
-
         noisy = noisy.to(device=device, dtype=dtype)
         timesteps = timesteps.to(device=device, dtype=dtype)
         sigmas = sigmas.to(device=device, dtype=dtype)
@@ -108,9 +106,6 @@ class CFGSampler:
             
             # 5. Update noisy
             noisy += v * dt
-        
-        if flip_back:
-            model.float()
 
         if model.vae is None:
             return noisy

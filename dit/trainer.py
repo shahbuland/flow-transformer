@@ -139,7 +139,7 @@ class Trainer:
         self.ema = EMA(
             self.accelerator.unwrap_model(model),
             beta = 0.9999,
-            update_after_step = 10,
+            update_after_step = 100,
             update_every = 1,
             ignore_names = {'repa', 'vae', 'text_embedder'},
             coerce_dtype = True
@@ -184,19 +184,20 @@ class Trainer:
 
                     if self.accelerator.sync_gradients:
                         self.total_step_counter += 1
-                        if self.total_step_counter % self.config.normalize_every == 0: self.accelerator.unwrap_model(model).normalize()
+                        self.accelerator.unwrap_model(model).normalize()
                         self.ema.update()
 
                     should = self.get_should()
                     if self.logging_config is not None and should['log'] or should['sample']:
                         wandb_dict = {
                             "loss": extra['diff_loss'].item(),
-                            "repa_loss": extra['repa_loss'].item(),
                             "time_per_1k" : sw.hit(self.config.target_batch_size),
                             "last_hidden_min": extra['last_hidden'].min(),
                             "last_hidden_max": extra['last_hidden'].max(),
                             "last_hidden_mean": extra['last_hidden'].mean()
                         }
+                        if self.model_config.repa_weight > 0:
+                            wandb_dict['repa_loss'] = extra['repa_loss'].item()
                         if scheduler:
                             wandb_dict["learning_rate"] = scheduler.get_last_lr()[0]
                         if should['sample']:

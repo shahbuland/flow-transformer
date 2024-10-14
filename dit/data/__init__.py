@@ -2,7 +2,8 @@ from torch.utils.data import DataLoader
 import torch
 from . import (
     mnist,
-    imagenet
+    imagenet,
+    coco
 )
 
 def create_loader(dataset_name, batch_size, image_size, deterministic=True, split='train'):
@@ -11,7 +12,6 @@ def create_loader(dataset_name, batch_size, image_size, deterministic=True, spli
     elif dataset_name.lower() == 'imagenet':
         dataset = imagenet.CustomImageNetDataset(image_size=image_size)
     elif dataset_name.lower() == 'coco':
-        from . import coco
         dataset = coco.CustomCOCODataset(image_size=image_size, split = split)
     else:
         raise ValueError(f"Dataset '{dataset_name}' is not supported.")

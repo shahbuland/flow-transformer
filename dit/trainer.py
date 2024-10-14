@@ -202,7 +202,10 @@ class Trainer:
                             wandb_dict["learning_rate"] = scheduler.get_last_lr()[0]
                         if should['sample']:
                             n_samples = self.config.n_samples
-                            images = to_wandb_batch(sampler.sample(n_samples, self.ema.ema_model, self.config.sample_prompts))
+                            images = to_wandb_batch(
+                                sampler.sample(n_samples, self.ema.ema_model, self.config.sample_prompts),
+                                self.config.sample_prompts
+                            )
                             wandb_dict.update({
                                 "samples": images
                             })

@@ -60,7 +60,7 @@ class CFGSampler:
     def sample(self, n_samples = None, model = None, prompts = None):
         if n_samples is None:
             n_samples = len(prompts)
-            
+
         n_steps = self.config.n_steps
         guidance_scale = self.config.cfg_scale
 
@@ -124,5 +124,8 @@ def to_wandb_image(x : TensorType["c", "h", "w"], caption : str = ""):
     x = x.detach().cpu().numpy()
     return wandb.Image(x, caption = caption)
 
-def to_wandb_batch(x):
-    return [to_wandb_image(x_i) for x_i in x]
+def to_wandb_batch(x, captions = None):
+    if captions is None:
+        return [to_wandb_image(x_i) for x_i in x]
+    else:
+        return [to_wandb_image(x_i, caption) for (x_i, caption) in zip(x, captions)]

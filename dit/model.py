@@ -11,12 +11,14 @@ from .utils import freeze, truncated_normal_init, mimetic_init, normal_init
 from rotary_embedding_torch import RotaryEmbedding
 
 from .configs import ModelConfig
-from .nn.embeddings import TimestepEmbedding, AbsEmbedding
+from .nn.embeddings import TimestepEmbedding, AbsEmbedding, SphericalAdditiveLayer
 from .nn.modulation import SimpleModulation
 from .nn.transformers import DiTBlock
 from .nn.text_embedder import TextEmbedder
+from .nn.normalization import Norm, RMSNorm, norm_layer, norm_dit_block, norm
+from .nn.repa import REPA
 
-class RectFlowTransformer(nn.Module):
+class RFTCore(nn.Module):
   def __init__(self, config: ModelConfig = ModelConfig()):
     super().__init__()
 
@@ -32,30 +34,72 @@ class RectFlowTransformer(nn.Module):
     self.t_embedder = TimestepEmbedding(d_model)
 
     n_patches = (sample_size // patch_size) ** 2
-    # Seen in repos that init'ing with std = 0.02 is better
-    # You can use abs + rope but often times it's not needed
     self.pos_enc = AbsEmbedding(n_patches, d_model)
+    #self.pos_enc = SphericalAdditiveLayer(n_patches, d_model)
 
-    # Shorter way to make many layers
     self.layers = nn.ModuleList([DiTBlock(config) for _ in range(n_layers)])
 
-    # Make some patchify and depatchify functions given the params
     self.patchify = lambda x: eo.rearrange(x, 'b c (n_p_h p_h) (n_p_w p_w) -> b (n_p_h n_p_w) (p_h p_w c)',
-                                           p_h = patch_size, p_w = patch_size)
+                                            p_h=patch_size, p_w=patch_size)
     self.depatchify = lambda x: eo.rearrange(x, 'b (n_p_h n_p_w) (p_h p_w c) -> b c (n_p_h p_h) (n_p_w p_w)',
-                                             p_h = patch_size, p_w = patch_size, n_p_h = sample_size//patch_size)
+                                              p_h=patch_size, p_w=patch_size, n_p_h=sample_size//patch_size)
 
     patch_content = channels * patch_size ** 2
 
     self.proj_in = nn.Linear(patch_content, d_model)
-    self.proj_out = nn.Linear(d_model, patch_content)
+    if self.config.take_label: 
+      self.text_proj = nn.Linear(self.config.text_d_model, d_model)
+      #freeze(self.text_proj)
     
-    #self.final_norm = RMSNorm(d_model)
-    self.final_norm = nn.LayerNorm(d_model, elementwise_affine = False, eps = 1.0e-6)
-    self.final_mod = SimpleModulation(d_model)
+    self.proj_out = nn.Linear(d_model, patch_content)
+    self.final_mod = SimpleModulation(d_model, normalized = True)
+
+    truncated_normal_init(self.pos_enc)
+      
+  def normalize(self):
+    norm_layer(self.text_proj)
+    norm_layer(self.proj_in)
+    #self.pos_enc.normalize()
+    norm_layer(self.proj_out)
+    for layer in self.layers:
+      norm_dit_block(layer)
+
+  def forward(self, x, t, c=None, output_hidden_states=False):
+    if c is not None:
+      c = self.text_proj(c)
+      c = norm(c)
+
+    x = self.patchify(x)
+    x = self.proj_in(x)
+    x = self.pos_enc(x)
+    x = norm(x)
+
+    t = self.t_embedder(t)
+
+    h = []
+    for layer in self.layers:
+      x = layer(x, t, c)
+      if output_hidden_states:
+        h.append(x)
+
+    x = self.final_mod(x, t)
+    x = self.proj_out(x)
+    x = self.depatchify(x)
+
+    if output_hidden_states:
+      return x, h
+    return x
+
+class RectFlowTransformer(nn.Module):
+  def __init__(self, config: ModelConfig = ModelConfig()):
+    super().__init__()
+
+    self.config = config
+
+    self.core = RFTCore(config)
 
     if self.config.take_label:
-      self.text_embedder = TextEmbedder(d_model)
+      self.text_embedder = TextEmbedder(config.d_model)
       freeze(self.text_embedder)
 
     self.vae = None
@@ -63,69 +107,76 @@ class RectFlowTransformer(nn.Module):
         self.vae = VAE()
         freeze(self.vae)
 
-    # Inits
-    for layer in self.layers:
-        pass
-        #truncated_normal_init(layer)
-        #mimetic_init(layer.qkv, layer.out, config.n_heads)
+    self.repa = None
+    if config.repa_weight > 0.0:
+      self.repa = REPA(self.config)
 
-    truncated_normal_init(self.pos_enc)
+  def parameters(self):
+    return self.core.parameters() # Only return what we need
   
   def encode_text(self, *args, **kwargs):
     return self.text_embedder.encode_text(*args, **kwargs)
+  
+  def normalize(self):
+    if self.repa is not None:
+      norm_layer(self.repa.mlp.fc1)
+      norm_layer(self.repa.mlp.fc2)
+    self.core.normalize()
 
   def forward(self, x):
     if self.config.take_label:
       x, ctx = x # c is list str
       if self.config.cfg_prob > 0:
-          mask = torch.rand(len(ctx)) < self.config.cfg_prob
-          ctx = [c if not m else "" for c, m in zip(ctx, mask)]
-          
+        mask = torch.rand(len(ctx)) < self.config.cfg_prob
+        ctx = [c if not m else "" for c, m in zip(ctx, mask)]
+
       ctx = self.text_embedder.encode_text(ctx)
       ctx = ctx.to(x.dtype).to(x.device)
       
     else:
       ctx = None
 
+    x_orig = x.clone()
     if self.vae is not None:
-        with torch.no_grad():
-            x = self.vae.encode(x)
+      with torch.no_grad():
+        x = self.vae.encode(x)
 
     b, c, h, w = x.shape
 
+    # prepare target and input
     with torch.no_grad():
-        z = torch.randn_like(x) # Noise we will lerp with
-        t = torch.randn(b, device = x.device, dtype = x.dtype).sigmoid() # log norm timesteps
+      z = torch.randn_like(x) # Noise we will lerp with
+      t = torch.randn(b, device = x.device, dtype = x.dtype).sigmoid() # log norm timesteps
 
-        # exp here means expanded
-        t_exp = eo.repeat(t, 'b -> b c h w', c = c, h = h, w = w) # Makes it the same shape as x and z so we can multiply
+      # exp here means expanded
+      t_exp = eo.repeat(t, 'b -> b c h w', c = c, h = h, w = w) # Makes it the same shape as x and z so we can multiply
 
-        # Based on ODE setup of going t: 0 -> 1 noise -> images
-        # t = 0 should be noise
-        lerpd = x * (1 - t_exp) + z * t_exp
-        target = z-x # Velocity to predict
+      # Based on ODE setup of going t: 0 -> 1 noise -> images
+      # t = 0 should be noise
+      lerpd = x * (1 - t_exp) + z * t_exp
+      target = z-x # Velocity to predict
 
-    x = self.denoise(lerpd, t, ctx)
+    extra = {}
 
-    loss = ((x - target) ** 2).mean()
-    return loss
+    x, h = self.denoise(lerpd, t, ctx, output_hidden_states=True)
+    extra['last_hidden'] = h[-2]
 
-  def denoise(self, x, t, c = None):
-    x = self.patchify(x)
-    x = self.proj_in(x)
+    diff_loss = ((x - target) ** 2).mean()
+    extra['diff_loss'] = diff_loss
+    total_loss = diff_loss
 
-    t_emb = self.t_embedder(t)
-    
-    for layer in self.layers:
-      x = layer(x, t_emb, c)
+    if self.training:
+      if self.repa is None:
+        repa_loss = 0.
+      else:
+        repa_loss = self.repa(x_orig, h[self.config.repa_layer_ind])
+      total_loss += repa_loss * self.config.repa_weight
+      extra['repa_loss'] = repa_loss
 
-    x = self.final_norm(x)
-    x = self.final_mod(x, t_emb)
-    x = self.proj_out(x)
-    x = self.depatchify(x)
+    return total_loss, extra
 
-    return x
-
+  def denoise(self, x, t, c = None, output_hidden_states = False):
+    return self.core(x,t,c,output_hidden_states)
 
 if __name__ == "__main__":
     import torch

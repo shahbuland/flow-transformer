@@ -4,9 +4,6 @@ import torch
 from torchvision import transforms
 from PIL import Image
 
-# Load the COCO dataset
-coco_dataset = load_dataset("HuggingFaceM4/COCO", split="train")
-
 # Define the transforms
 def get_transform(image_size):
     return transforms.Compose([
@@ -18,8 +15,8 @@ def get_transform(image_size):
     ])
 
 class CustomCOCODataset(Dataset):
-    def __init__(self, image_size=256):
-        self.dataset = coco_dataset
+    def __init__(self, image_size=512, split = 'train'):
+        self.dataset = load_dataset("HuggingFaceM4/COCO", split=split)
         self.transform = get_transform(image_size)
 
     def __len__(self):
@@ -31,23 +28,3 @@ class CustomCOCODataset(Dataset):
         if self.transform:
             image = self.transform(image)
         return image, str(label)
-
-
-# Add this at the end of the file, outside the class definition
-if __name__ == "__main__":
-    from torch.utils.data import DataLoader
-
-    # Create an instance of the dataset
-    dataset = CustomCOCODataset(image_size=256)
-
-    # Create a DataLoader
-    loader = DataLoader(dataset, batch_size=2, shuffle=True)
-
-    # Get a sample batch
-
-    sample_image, sample_label = next(iter(loader))
-
-    # Print the shape of the image and the label
-    print(f"Image shape: {sample_image.shape}")
-    print(sample_label)
-

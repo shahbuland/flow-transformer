@@ -31,12 +31,12 @@ class ModelConfig:
 class TrainConfig:
     dataset : str = "coco"
     target_batch_size : int = 256
-    batch_size : int = 128
+    batch_size : int = 64
     epochs : int = 100
     # optimizer
     opt : str = "AdamW"
     opt_kwargs : Dict = field(default_factory = lambda : {
-        "lr": 1.0e-2,
+        "lr": 1.0e-3,
         "eps": 1.0e-15,
         "betas" : (0.9, 0.96),
         "weight_decay" : 0.00,
@@ -44,7 +44,7 @@ class TrainConfig:
     })
 
     # scheduler
-    scheduler: Optional[str] = "CosineDecay"
+    scheduler: Optional[str] = None#"CosineDecay"
     scheduler_kwargs: Dict = field(default_factory=lambda: {
         "T_max" : 1000000,
         "eta_min" : 5.0e-6
@@ -54,14 +54,23 @@ class TrainConfig:
     checkpoint_root_dir = "checkpoints"
 
     log_interval : int = 1
-    sample_interval : int = 50
+    sample_interval : int = 100
     save_interval : int = 2500
     val_interval : int = 1000
     resume : bool = False
 
     # Sampling
-    n_samples : int = 4 # Number of samples to log each time (too many gets crowded)
-    sample_prompts = ["a dog in a park", "the blue sky", "the ocean", "the beach"]
+    n_samples : int = 8 # Number of samples to log each time (too many gets crowded)
+    sample_prompts = [
+        "a dog in a park",
+        "the blue sky",
+        "the ocean",
+        "the beach",
+        "a beautiful rainbow feathered bird",
+        "a snowy mountain with clear skies",
+        "a woman cutting a cake",
+        "a red sports car"
+    ]
     
     # Validating
     val_batch_mult = 4
@@ -71,7 +80,7 @@ class TrainConfig:
     
 @dataclass
 class LoggingConfig:
-    run_name : str = "coco 150M (repa, lr=1e-2)"
+    run_name : str = "coco 150M (ngpt, lr=1e-3 + repa + norm_repa)"
     wandb_entity : str = "shahbuland"
     wandb_project : str = "mnist_sanity"
 

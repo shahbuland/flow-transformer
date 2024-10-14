@@ -16,6 +16,7 @@ from .nn.modulation import SimpleModulation
 from .nn.transformers import DiTBlock
 from .nn.text_embedder import TextEmbedder
 from .nn.normalization import Norm, RMSNorm, norm_layer, norm_dit_block
+from .nn.repa import REPA
 
 class RectFlowTransformer(nn.Module):
   def __init__(self, config: ModelConfig = ModelConfig()):
@@ -74,6 +75,7 @@ class RectFlowTransformer(nn.Module):
 
     truncated_normal_init(self.pos_enc)
     self.norm = Norm()
+    self.repa = REPA(self.config.d_model, self.config.repa_batch_size, self.config.repa_pool_factor)
   
   def encode_text(self, *args, **kwargs):
     return self.text_embedder.encode_text(*args, **kwargs)
@@ -97,12 +99,14 @@ class RectFlowTransformer(nn.Module):
     else:
       ctx = None
 
+    x_orig = x.clone()
     if self.vae is not None:
         with torch.no_grad():
             x = self.vae.encode(x)
 
     b, c, h, w = x.shape
 
+    # prepare target and input
     with torch.no_grad():
         z = torch.randn_like(x) # Noise we will lerp with
         t = torch.randn(b, device = x.device, dtype = x.dtype).sigmoid() # log norm timesteps
@@ -115,10 +119,21 @@ class RectFlowTransformer(nn.Module):
         lerpd = x * (1 - t_exp) + z * t_exp
         target = z-x # Velocity to predict
 
-    x, h = self.denoise(lerpd, t, ctx, output_hidden_states=True)
+    extra = {}
 
-    loss = ((x - target) ** 2).mean()
-    return loss, {'last_hidden' : h[-2]}
+    x, h = self.denoise(lerpd, t, ctx, output_hidden_states=True)
+    extra['last_hidden'] = h[-2]
+
+    diff_loss = ((x - target) ** 2).mean()
+    extra['diff_loss'] = diff_loss
+    total_loss = diff_loss
+
+    if self.training:
+      repa_loss = self.repa(x_orig, h[self.config.repa_layer_ind])
+      total_loss += repa_loss
+      extra['repa_loss'] = repa_loss
+
+    return total_loss, extra
 
   def denoise(self, x, t, c = None, output_hidden_states = False):
     x = self.patchify(x)

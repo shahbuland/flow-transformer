@@ -28,6 +28,6 @@ class MLP(nn.Module):
   def forward(self, x):
     x = self.fc1(x) 
     if self.use_scale: x *= (1. + self.scale)[None,None,:] * self.v_scale
-    x = self.act(x.half()).to(x.dtype)
+    x = self.act(x)
     x = self.fc2(x)
     return x

@@ -3,10 +3,14 @@ import wandb
 import einops as eo
 from torchtyping import TensorType
 import torch
+from tqdm import tqdm
+
+from .configs import SamplerConfig
 
 class Sampler:
-    def __init__(self):
+    def __init__(self, config : SamplerConfig):
         self.scheduler = FlowMatchEulerDiscreteScheduler(shift=3)
+        self.config = config
 
     @torch.no_grad()
     def sample(self, n_samples, model, prompts = None, n_steps = 40):
@@ -48,11 +52,16 @@ class Sampler:
 
 
 class CFGSampler:
-    def __init__(self):
+    def __init__(self, config : SamplerConfig = SamplerConfig()):
         self.scheduler = FlowMatchEulerDiscreteScheduler(shift=3)
+        self.config = config
 
     @torch.no_grad()
-    def sample(self, n_samples, model, prompts, n_steps=40, guidance_scale=1.5):
+    def sample(self, n_samples, model, prompts):
+        n_steps = self.config.n_steps
+        guidance_scale = self.config.cfg_scale
+
+
         assert prompts is not None, "Prompts cannot be None for CFGSampler"
         assert len(prompts) == n_samples, "Number of prompts must match number of samples"
 
@@ -67,17 +76,23 @@ class CFGSampler:
         timesteps = self.scheduler.timesteps / 1000
         sigmas = self.scheduler.sigmas
 
+        torch.manual_seed(0)
         noisy = torch.randn(*sample_shape)
 
         device = next(model.parameters()).device
         dtype = next(model.parameters()).dtype
+
+        flip_back = False
+        if dtype == torch.float:
+            model.half()
+            dtype = torch.half
 
         noisy = noisy.to(device=device, dtype=dtype)
         timesteps = timesteps.to(device=device, dtype=dtype)
         sigmas = sigmas.to(device=device, dtype=dtype)
         c = c.to(device=device, dtype=dtype)
 
-        for i, t in enumerate(timesteps):
+        for i, t in tqdm(enumerate(timesteps)):
             dt = sigmas[i+1] - sigmas[i]
             
             # 2. Double the noisy tensor along the batch dimension
@@ -94,6 +109,9 @@ class CFGSampler:
             # 5. Update noisy
             noisy += v * dt
         
+        if flip_back:
+            model.float()
+
         if model.vae is None:
             return noisy
         else:

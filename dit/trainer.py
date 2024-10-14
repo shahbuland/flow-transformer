@@ -139,8 +139,10 @@ class Trainer:
         self.ema = EMA(
             self.accelerator.unwrap_model(model),
             beta = 0.9999,
-            update_after_step = 100,
-            update_every = 1
+            update_after_step = 10,
+            update_every = 1,
+            ignore_names = {'repa', 'vae', 'text_embedder'},
+            coerce_dtype = True
         )
 
         # load checkpoint if we want to 
@@ -209,12 +211,10 @@ class Trainer:
                         self.save(self.total_step_counter)
                     if should['val'] and validator is not None:
                         self.ema.ema_model.eval()
-                        #val_loss = validator(self.ema.ema_model)
+                        val_loss = validator(self.ema.ema_model)
                         pick_score = scorer(sampler, self.ema.ema_model)
                         self.ema.ema_model.train()
-                        #print(val_loss)
-                        print(pick_score)
-                        exit()
+                        
                         wandb.log({
                             'validation_loss' : val_loss,
                             'pick_score' : pick_score

@@ -6,7 +6,7 @@ from torchtyping import TensorType
 import einops as eo
 
 from .mlp import MLP
-from .configs import ModelConfig
+from ..configs import ModelConfig
 from ..utils import freeze
 
 def dino_proc(x: TensorType["b", "c", "h", "w"]):
@@ -44,7 +44,7 @@ class REPA(nn.Module):
         self.dino = AutoModel.from_pretrained(dino_path)
         self.dino.to(device='cuda',dtype=torch.half)
         self.mlp = MLP(
-            config.d_model * (pool_factor ** 2),
+            config.d_model * (self.pool_factor ** 2),
             dim_out=self.dino.config.hidden_size,
             use_scale = False,
             d_middle = config.d_model * 4

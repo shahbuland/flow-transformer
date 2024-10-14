@@ -18,6 +18,7 @@ class ModelConfig:
     
     # Guidance
     take_label : bool = True # Take the batch as (pixel_values, label_str) instead of pixel_values
+    text_d_model : int = 512 # Hidden size of text embedding model
     cfg_prob : float = 0.1
 
     # REPA
@@ -55,7 +56,7 @@ class TrainConfig:
     log_interval : int = 1
     sample_interval : int = 50
     save_interval : int = 2500
-    val_interval : int = 1
+    val_interval : int = 1000
     resume : bool = False
 
     # Sampling
@@ -70,7 +71,7 @@ class TrainConfig:
     
 @dataclass
 class LoggingConfig:
-    run_name : str = "coco 150M (adam, +ngpt, lr=1e-2)"
+    run_name : str = "coco 150M (repa, lr=1e-2)"
     wandb_entity : str = "shahbuland"
     wandb_project : str = "mnist_sanity"
 

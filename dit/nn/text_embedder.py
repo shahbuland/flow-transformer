@@ -8,10 +8,6 @@ class TextEmbedder(nn.Module):
 
         self.model = CLIPTextModel.from_pretrained("openai/clip-vit-base-patch32")
         self.tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-base-patch32")
-        self.proj = nn.Linear(self.model.config.hidden_size, dim)
-
-        self.cuda()
-        self.half()
 
     def tokenize(self, text_list):
         return self.tokenizer(text_list, padding='max_length', max_length = 77, truncation=True, return_tensors="pt")
@@ -22,7 +18,7 @@ class TextEmbedder(nn.Module):
 
         outputs = self.model(input_ids=input_ids, attention_mask=attention_mask, output_hidden_states = True)
         hidden_states = outputs.hidden_states[-2]  # Second last hidden state
-        return self.proj(hidden_states)
+        return hidden_states
 
     @torch.no_grad()
     def encode_text(self, text_list):

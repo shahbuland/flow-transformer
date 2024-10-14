@@ -9,10 +9,12 @@ class MLP(nn.Module):
   this model essentially processes each word individually,
   i.e. information flow from input to output is only within words, not between them
   """
-  def __init__(self, dim, dim_out = None, use_scale = True):
+  def __init__(self, dim, dim_out = None, d_middle = None, use_scale = True):
     super().__init__()
     if dim_out is None:
       dim_out = dim
+    if d_middle is None:
+      d_middle = 4 * dim
 
     self.fc1 = nn.Linear(dim, 4 * dim) # hiddden size in transformer MLPs is normally 4x the input size
     self.act = nn.GELU()
@@ -26,6 +28,6 @@ class MLP(nn.Module):
   def forward(self, x):
     x = self.fc1(x) 
     if self.use_scale: x *= (1. + self.scale)[None,None,:] * self.v_scale
-    x = self.act(x)
+    x = self.act(x.half()).to(x.dtype)
     x = self.fc2(x)
     return x

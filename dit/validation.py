@@ -57,9 +57,8 @@ class PickScorer:
         text_emb = self.model.get_text_features(input_ids = inputs.input_ids, attention_mask = inputs.attention_mask)
         text_emb = F.normalize(text_emb, p = 2, dim = -1)
 
-        scores = self.model.logit_scale.exp() * (text_emb @ img_emb.T)
-        scores = scores.diag().sum().item()
-        return scores
+        cos_sims = torch.einsum('bd,bd->b', img_emb, text_emb)
+        return cos_sims.sum()
 
     @torch.no_grad()
     def __call__(self, sampler, model):
@@ -79,7 +78,7 @@ class PickScorer:
 
             
             score = self.call_pickscore(prompt_batch, pil_images)
-            pick_score_total += score
+            pick_score_total += score.item()
 
             # Free up CUDA memory
             del images

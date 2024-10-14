@@ -5,14 +5,14 @@ from . import (
     imagenet
 )
 
-def create_loader(dataset_name, batch_size, image_size, deterministic=False):
+def create_loader(dataset_name, batch_size, image_size, deterministic=True, split='train'):
     if dataset_name.lower() == 'mnist':
         dataset = mnist.CustomMNISTDataset(image_size=image_size)
     elif dataset_name.lower() == 'imagenet':
         dataset = imagenet.CustomImageNetDataset(image_size=image_size)
     elif dataset_name.lower() == 'coco':
         from . import coco
-        dataset = coco.CustomCOCODataset(image_size=image_size)
+        dataset = coco.CustomCOCODataset(image_size=image_size, split = split)
     else:
         raise ValueError(f"Dataset '{dataset_name}' is not supported.")
 
@@ -23,7 +23,8 @@ def create_loader(dataset_name, batch_size, image_size, deterministic=False):
     return DataLoader(
         dataset,
         batch_size=batch_size,
-        shuffle=True,
+        shuffle=True if split == 'train' else False,
         generator=generator,
-        pin_memory = True
+        pin_memory = True,
+        num_workers = 4
     )

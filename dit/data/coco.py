@@ -4,13 +4,10 @@ import torch
 from torchvision import transforms
 from PIL import Image
 
-# Load the COCO dataset
-coco_dataset = load_dataset("HuggingFaceM4/COCO", split="train")
-
 # Define the transforms
 def get_transform(image_size):
     return transforms.Compose([
-        transforms.RandomResizedCrop(image_size),
+        transforms.Resize((image_size, image_size)),
         transforms.RandomHorizontalFlip(),
         transforms.Lambda(lambda img: img.convert('RGB')),  # Convert to RGB
         transforms.ToTensor(),
@@ -18,8 +15,8 @@ def get_transform(image_size):
     ])
 
 class CustomCOCODataset(Dataset):
-    def __init__(self, image_size=224):
-        self.dataset = coco_dataset
+    def __init__(self, image_size=512, split = 'train'):
+        self.dataset = load_dataset("HuggingFaceM4/COCO", split=split)
         self.transform = get_transform(image_size)
 
     def __len__(self):
@@ -27,6 +24,10 @@ class CustomCOCODataset(Dataset):
 
     def __getitem__(self, idx):
         image = self.dataset[idx]['image']
+        label = self.dataset[idx]['sentences']['raw']
         if self.transform:
             image = self.transform(image)
-        return image
+        return image, str(label)
+
+
+

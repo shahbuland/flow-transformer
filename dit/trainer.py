@@ -9,6 +9,7 @@ from ema_pytorch import EMA
 from .configs import TrainConfig, LoggingConfig, ModelConfig
 from .utils import get_scheduler_cls, Stopwatch, get_extra_optimizer
 from .sampling import Sampler, CFGSampler, to_wandb_batch
+from .validation import Validator, PickScorer
 
 class Trainer:
     def __init__(self, config : TrainConfig, logging_config : LoggingConfig = None, model_config : ModelConfig = None):
@@ -50,10 +51,15 @@ class Trainer:
         # Get a dict of bools that determines if certain things should be done at the current step
         if step is None:
             step = self.total_step_counter
+
+        def should_fn(interval):
+            return step % interval == 0 and self.accelerator.sync_gradients
+
         return {
-            "log" : step % self.config.log_interval == 0 and self.accelerator.sync_gradients,
-            "save" : step % self.config.save_interval == 0 and self.accelerator.sync_gradients,
-            "sample" : step % self.config.sample_interval == 0 and self.accelerator.sync_gradients
+            "log" : should_fn(self.config.log_interval),
+            "save" : should_fn(self.config.save_interval),
+            "sample" : should_fn(self.config.sample_interval),
+            "val" : should_fn(self.config.val_interval)
         }
 
     def save(self, step = None, dir = None):
@@ -86,6 +92,7 @@ class Trainer:
         
         if not matching_dirs:
             print(f"No checkpoints found for {run_name}")
+            _ = input("Are you sure you want to continue?")
             return
         
         # Sort directories by the number at the end and get the latest
@@ -104,13 +111,15 @@ class Trainer:
         
         print("Checkpoint loaded successfully")
 
-    def train(self, model, loader):
+    def train(self, model, loader, val_loader = None):
+        # optimizer setup 
         try:
             opt_class = getattr(torch.optim, self.config.opt)
         except:
             opt_class = get_extra_optimizer(self.config.opt)
         opt = opt_class(model.parameters(), **self.config.opt_kwargs)
 
+        # scheduler setup
         scheduler = None
         if self.config.scheduler is not None:
             try:
@@ -119,11 +128,14 @@ class Trainer:
                 scheduler_class = get_scheduler_cls(self.config.scheduler)
             scheduler = scheduler_class(opt, **self.config.scheduler_kwargs)
 
+        # accelerator prepare
+        model.train()
         if scheduler:
             model, loader, opt, scheduler = self.accelerator.prepare(model, loader, opt, scheduler)
         else:
             model, loader, opt = self.accelerator.prepare(model, loader, opt)
 
+        # ema setup
         self.ema = EMA(
             self.accelerator.unwrap_model(model),
             beta = 0.9999,
@@ -131,6 +143,7 @@ class Trainer:
             update_every = 1
         )
 
+        # load checkpoint if we want to 
         if self.config.resume:
             self.load()
 
@@ -140,11 +153,18 @@ class Trainer:
         if self.logging_config is not None:
             wandb.watch(self.accelerator.unwrap_model(model), log = 'all')
 
+        # Set up sampler (maybe with cfg)
         if self.model_config.cfg_prob > 0.0:
             sampler = CFGSampler()
         else:
             sampler = Sampler()
-        
+
+        # Set up validator
+        validator = None
+        if val_loader is not None:
+            validator = Validator(self.accelerator.prepare(val_loader), self.config.batch_size * self.config.val_batch_mult)
+        scorer = PickScorer(self.config.batch_size * self.config.val_batch_mult)
+
         for epoch in range(self.config.epochs):
             for i, batch in enumerate(loader):
                 with self.accelerator.accumulate(model):
@@ -168,7 +188,8 @@ class Trainer:
                     should = self.get_should()
                     if self.logging_config is not None and should['log'] or should['sample']:
                         wandb_dict = {
-                            "loss": loss.item(),
+                            "loss": extra['diff_loss'].item(),
+                            "repa_loss": extra['repa_loss'].item(),
                             "time_per_1k" : sw.hit(self.config.target_batch_size),
                             "last_hidden_min": extra['last_hidden'].min(),
                             "last_hidden_max": extra['last_hidden'].max(),
@@ -186,3 +207,16 @@ class Trainer:
                         sw.reset()
                     if should['save']:
                         self.save(self.total_step_counter)
+                    if should['val'] and validator is not None:
+                        self.ema.ema_model.eval()
+                        #val_loss = validator(self.ema.ema_model)
+                        pick_score = scorer(sampler, self.ema.ema_model)
+                        self.ema.ema_model.train()
+                        #print(val_loss)
+                        print(pick_score)
+                        exit()
+                        wandb.log({
+                            'validation_loss' : val_loss,
+                            'pick_score' : pick_score
+                        })
+                        

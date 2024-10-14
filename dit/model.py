@@ -118,6 +118,9 @@ class RectFlowTransformer(nn.Module):
     return self.text_embedder.encode_text(*args, **kwargs)
   
   def normalize(self):
+    if self.repa is not None:
+      norm_layer(self.repa.mlp.fc1)
+      norm_layer(self.repa.mlp.fc2)
     self.core.normalize()
 
   def forward(self, x):

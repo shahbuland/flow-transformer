@@ -31,9 +31,24 @@ def dino_proc(x: TensorType["b", "c", "h", "w"]):
 
 # This only works for a factor of 2 currently
 def patch_pool(x : TensorType["b", "n", "d"], config : ModelConfig):
-    #x = eo.rearrange(x, 'b (n_p_h n_p_w) d -> b n_p_h n_p_w d', n_p_h = config.sample_size//config.patch_size)
-    #x = eo.rearrange(x, '')
-    return x
+    n_patches = config.sample_size // config.patch_size
+    x = eo.rearrange(x, 'b (n_p_h n_p_w) d -> b n_p_h n_p_w d', n_p_h = n_patches)
+
+    top_rows = x[:,::2]
+    bottom_rows = x[:,1::2]
+
+    top_rows = eo.rearrange(top_rows, 'b n_p_h n_p_w d -> b (n_p_h n_p_w) d')
+    top_left_patch = top_rows[:,::2]
+    top_right_patch = top_rows[:,1::2]
+
+    bottom_rows = eo.rearrange(bottom_rows, 'b n_p_h n_p_w d -> b (n_p_h n_p_w) d')
+    bottom_left_patch = bottom_rows[:,::2]
+    bottom_right_patch = bottom_rows[:,1::2]
+
+    # Now should all be [b,k,d] where k is n / 4
+    # want [b,k,d*4]
+    pooled = torch.cat([top_left_patch, top_right_patch, bottom_left_patch, bottom_right_patch], dim = -1)
+    return pooled
 
 class REPA(nn.Module):
     def __init__(self, config : ModelConfig, dino_path = "facebook/dinov2-small"):
@@ -46,7 +61,7 @@ class REPA(nn.Module):
         self.mlp = MLP(
             config.d_model * (self.pool_factor ** 2),
             dim_out=self.dino.config.hidden_size,
-            use_scale = False,
+            use_scale = True,
             d_middle = config.d_model * 4
         )
         self.batch_size = config.repa_batch_size
@@ -80,11 +95,13 @@ class REPA(nn.Module):
         # features [b,n,d]
 
         if self.pool_factor > 1:
-            patch_p
+            features = self.patch_pool(features)
 
         h = self.dino_features(x)
         h_rft = self.mlp(features)
         # now both [b,n,d] in the same space
+
+        #return F.mse_loss(h, h_rft)
 
         h = F.normalize(h, p = 2, dim = -1)
         h_rft = F.normalize(h_rft, p = 2, dim = -1)

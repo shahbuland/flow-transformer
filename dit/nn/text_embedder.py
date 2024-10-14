@@ -9,6 +9,9 @@ class TextEmbedder(nn.Module):
         self.model = CLIPTextModel.from_pretrained("openai/clip-vit-base-patch32")
         self.tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-base-patch32")
 
+        self.cuda()
+        self.half()
+
     def tokenize(self, text_list):
         return self.tokenizer(text_list, padding='max_length', max_length = 77, truncation=True, return_tensors="pt")
 

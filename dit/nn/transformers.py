@@ -153,7 +153,7 @@ class DiTBlock(nn.Module):
     flash = config.flash
     cross_attn = config.take_label
 
-    self.mod = DoubleModBlock(d_model)
+    self.mod = DoubleModBlock(d_model, normalized = True)
 
     self.attn = Attn(n_heads, d_model, flash, cross_attn)
     self.mlp = MLP(d_model)
@@ -185,8 +185,8 @@ class DiTBlock(nn.Module):
     #x = self.norm_1(x)
     #x = mod1.first_step(x)
     
-    x = self.norm(mod1.first_step(self.norm(x)))
-    #x = mod1.first_step(x)
+    #x = self.norm(mod1.first_step(self.norm(x)))
+    x = mod1.first_step(x)
 
     if self.cross:
         attn_out = self.attn(x, c)
@@ -194,7 +194,7 @@ class DiTBlock(nn.Module):
         attn_out = self.attn(x)
     
 
-    attn_out = self.norm(mod1.second_step(self.norm(attn_out))) # h_A
+    attn_out = mod1.second_step(self.norm(attn_out)) # h_A
     #attn_out = mod1.second_step(attn_out)
 
     x = self.norm(resid_1 + self.get_alpha_attn() * (attn_out - resid_1))
@@ -202,12 +202,12 @@ class DiTBlock(nn.Module):
 
     resid_2 = x.clone()
 
-    x = self.norm(mod2.first_step(self.norm(x)))
-    #x = mod2.first_step(self.norm_2(x))
+    #x = self.norm(mod2.first_step(self.norm(x)))
+    x = mod2.first_step(x)
     
     x = self.mlp(x)
 
-    x = self.norm(mod2.second_step(x)) # h_M
+    x = mod2.second_step(x) # h_M
     #x = mod2.second_step(x)
 
     x = self.norm(resid_2 + self.get_alpha_mlp() * (x - resid_2))

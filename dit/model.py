@@ -11,11 +11,11 @@ from .utils import freeze, truncated_normal_init, mimetic_init, normal_init
 from rotary_embedding_torch import RotaryEmbedding
 
 from .configs import ModelConfig
-from .nn.embeddings import TimestepEmbedding, AbsEmbedding
+from .nn.embeddings import TimestepEmbedding, AbsEmbedding, SphericalAdditiveLayer
 from .nn.modulation import SimpleModulation
 from .nn.transformers import DiTBlock
 from .nn.text_embedder import TextEmbedder
-from .nn.normalization import Norm, RMSNorm, norm_layer, norm_dit_block
+from .nn.normalization import Norm, RMSNorm, norm_layer, norm_dit_block, norm
 from .nn.repa import REPA
 
 class RFTCore(nn.Module):
@@ -35,6 +35,7 @@ class RFTCore(nn.Module):
 
     n_patches = (sample_size // patch_size) ** 2
     self.pos_enc = AbsEmbedding(n_patches, d_model)
+    #self.pos_enc = SphericalAdditiveLayer(n_patches, d_model)
 
     self.layers = nn.ModuleList([DiTBlock(config) for _ in range(n_layers)])
 
@@ -46,16 +47,19 @@ class RFTCore(nn.Module):
     patch_content = channels * patch_size ** 2
 
     self.proj_in = nn.Linear(patch_content, d_model)
-    if self.config.take_label: self.text_proj = nn.Linear(self.config.text_d_model, d_model)
-    self.proj_out = nn.Linear(d_model, patch_content)
+    if self.config.take_label: 
+      self.text_proj = nn.Linear(self.config.text_d_model, d_model)
+      #freeze(self.text_proj)
     
-    self.final_norm = Norm()
-    self.final_mod = SimpleModulation(d_model)
+    self.proj_out = nn.Linear(d_model, patch_content)
+    self.final_mod = SimpleModulation(d_model, normalized = True)
 
     truncated_normal_init(self.pos_enc)
       
   def normalize(self):
+    norm_layer(self.text_proj)
     norm_layer(self.proj_in)
+    #self.pos_enc.normalize()
     norm_layer(self.proj_out)
     for layer in self.layers:
       norm_dit_block(layer)
@@ -63,11 +67,14 @@ class RFTCore(nn.Module):
   def forward(self, x, t, c=None, output_hidden_states=False):
     if c is not None:
       c = self.text_proj(c)
+      c = norm(c)
 
     x = self.patchify(x)
     x = self.proj_in(x)
+    x = self.pos_enc(x)
+    x = norm(x)
+
     t = self.t_embedder(t)
-    x = x + self.pos_enc(x)
 
     h = []
     for layer in self.layers:
@@ -75,7 +82,6 @@ class RFTCore(nn.Module):
       if output_hidden_states:
         h.append(x)
 
-    x = self.final_norm(x)
     x = self.final_mod(x, t)
     x = self.proj_out(x)
     x = self.depatchify(x)
@@ -101,7 +107,9 @@ class RectFlowTransformer(nn.Module):
         self.vae = VAE()
         freeze(self.vae)
 
-    self.repa = REPA(self.config)
+    self.repa = None
+    if config.repa_weight > 0.0:
+      self.repa = REPA(self.config)
 
   def parameters(self):
     return self.core.parameters() # Only return what we need
@@ -155,8 +163,11 @@ class RectFlowTransformer(nn.Module):
     total_loss = diff_loss
 
     if self.training:
-      repa_loss = self.repa(x_orig, h[self.config.repa_layer_ind])
-      total_loss += repa_loss
+      if self.repa is None:
+        repa_loss = 0.
+      else:
+        repa_loss = self.repa(x_orig, h[self.config.repa_layer_ind])
+      total_loss += repa_loss * self.config.repa_weight
       extra['repa_loss'] = repa_loss
 
     return total_loss, extra

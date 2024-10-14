@@ -7,6 +7,8 @@ class VAE(nn.Module):
         super().__init__()
 
         self.model = AutoencoderTiny.from_pretrained(path)#taef1", torch_dtype = torch.half)
+        self.model.cuda()
+        self.model.half()
 
         self.force_batch_size = force_batch_size
     

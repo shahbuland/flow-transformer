@@ -1,5 +1,6 @@
 import torch
 from torch import nn
+import torch.nn.functional as F
 
 from torchtyping import TensorType
 
@@ -25,14 +26,12 @@ class Norm(nn.Module):
         self.eps = eps
     
     def forward(self, x):
-        rss = (x.float().pow(2).sum(-1, keepdim = True) + self.eps).rsqrt()
-        return x * rss
+        return F.normalize(x.float(), p = 2, dim = -1).to(x.dtype)
     
 LayerNorm = lambda dim: nn.LayerNorm(dim, elementwise_affine = False, eps = 1.0e-6)
 
-def norm(data):
-    norm = torch.norm(data.float(), p=2, dim=-1, keepdim=True)
-    return data / (norm.to(data.dtype) + 1e-6)  # Adding small epsilon to avoid division by zero
+def norm(x, eps = 1.0e-6):
+    return F.normalize(x.float(), p = 2, dim = -1).to(x.dtype)
 
 def norm_layer(module : nn.Module):
     """

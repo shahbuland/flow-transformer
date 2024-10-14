@@ -6,6 +6,7 @@ import math
 from rotary_embedding_torch import RotaryEmbedding
 
 from .mlp import MLP
+from .normalization import norm
 
 class AbsEmbedding(nn.Module):
     def __init__(self, seq_len, dim):
@@ -17,6 +18,39 @@ class AbsEmbedding(nn.Module):
         # x: [b,n,d]
         p = eo.repeat(self.embedding, 'n d -> b n d', b = x.shape[0])
         return x + p
+
+class SphericalAdditiveLayer(nn.Module):
+    def __init__(self, seq_len, dim, eps = 1.0e-6):
+        super().__init__()
+        # Modified version of any layer that involves addition
+
+        self.embedding = nn.Parameter(torch.randn(seq_len, dim))
+        self.scales = nn.Parameter(torch.zeros(seq_len))
+        self.eps = eps
+    
+    def normalize(self):
+        self.embedding.data = norm(self.embedding.data)
+    
+    def forward(self, x):
+        # x is [b,n,d]
+        scales = eo.repeat(1. + self.scales, 'n -> b n 1', b = x.shape[0])
+        p = eo.repeat(self.embedding, 'n d -> b n d', b = x.shape[0])
+
+        # normalize both then get dot product
+        x = norm(x)
+        p = norm(p)
+        dot = torch.clamp(
+            torch.sum(x * p, dim = -1, keepdim = True),
+            -1 + self.eps, 1 - self.eps
+        )
+        omega = torch.acos(dot)
+        sin_omega = torch.sin(omega)
+
+        sin_omega = torch.where(sin_omega.abs() < self.eps, torch.ones_like(sin_omega), sin_omega)
+        a = torch.sin((1 - scales) * omega) / sin_omega
+        b = torch.sin(scales * omega) / sin_omega
+
+        return a * x + b * p
 
 class RoPEEmbedding(nn.Module):
     """

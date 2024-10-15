@@ -19,9 +19,6 @@ def dino_proc(x: TensorType["b", "c", "h", "w"]):
     # Resize
     x = F.interpolate(x, size=(224, 224), mode='bilinear', align_corners=False)
 
-    # Rescale
-    x = x * 0.00392156862745098  # This is the rescale_factor
-
     # Normalize
     mean = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1).to(x.device)
     std = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1).to(x.device)
@@ -72,13 +69,10 @@ class REPA(nn.Module):
     
         freeze(self.dino)
 
-    def to(self, *args, **kwargs): # don't touch dino
-        self.mlp.to(*args, **kwargs)
-
     @torch.no_grad()
     def dino_features(self, x):
         # x is [b,c,h,w] [-1,1]
-        inputs = dino_proc(x.half().cuda())
+        inputs = dino_proc(x)
         input_batches = inputs.split(self.batch_size)
 
         h_all = []

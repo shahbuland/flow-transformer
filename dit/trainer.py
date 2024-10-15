@@ -47,6 +47,8 @@ class Trainer:
         self.total_step_counter = 0
         self.ema = None
 
+        self.ema = None
+
     def get_should(self, step = None):
         # Get a dict of bools that determines if certain things should be done at the current step
         if step is None:
@@ -223,4 +225,3 @@ class Trainer:
                             'validation_loss' : val_loss,
                             'pick_score' : pick_score
                         })
-                        

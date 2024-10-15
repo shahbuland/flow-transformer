@@ -158,12 +158,14 @@ class RectFlowTransformer(nn.Module):
 
     extra = {}
 
-    x, h = self.denoise(lerpd, t, ctx, output_hidden_states=True)
+    pred, h = self.denoise(lerpd, t, ctx, output_hidden_states=True)
     extra['last_hidden'] = h[-2]
 
-    diff_loss = ((x - target) ** 2).mean()
-    extra['diff_loss'] = diff_loss
-    total_loss = diff_loss
+    total_loss = 0.
+
+    diff_loss = F.mse_loss(target, pred)
+    extra['diff_loss'] = diff_loss.item()
+    total_loss += diff_loss
 
     if self.training:
       if self.repa is None:
@@ -171,7 +173,7 @@ class RectFlowTransformer(nn.Module):
       else:
         repa_loss = self.repa(x_orig, h[self.config.repa_layer_ind])
       total_loss += repa_loss * self.config.repa_weight
-      extra['repa_loss'] = repa_loss
+      extra['repa_loss'] = repa_loss.item()
 
     return total_loss, extra
 

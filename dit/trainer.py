@@ -190,14 +190,14 @@ class Trainer:
                     should = self.get_should()
                     if self.logging_config is not None and should['log'] or should['sample']:
                         wandb_dict = {
-                            "loss": extra['diff_loss'].item(),
+                            "loss": extra['diff_loss'],
                             "time_per_1k" : sw.hit(self.config.target_batch_size),
                             "last_hidden_min": extra['last_hidden'].min(),
                             "last_hidden_max": extra['last_hidden'].max(),
                             "last_hidden_mean": extra['last_hidden'].mean()
                         }
                         if self.model_config.repa_weight > 0:
-                            wandb_dict['repa_loss'] = extra['repa_loss'].item()
+                            wandb_dict['repa_loss'] = extra['repa_loss']
                         if scheduler:
                             wandb_dict["learning_rate"] = scheduler.get_last_lr()[0]
                         if should['sample']:

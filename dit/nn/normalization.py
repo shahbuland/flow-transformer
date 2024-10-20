@@ -34,9 +34,7 @@ class Norm(nn.Module):
 LayerNorm = lambda dim: nn.LayerNorm(dim, elementwise_affine = False, eps = 1.0e-6)
 
 def norm(data):
-    return F.normalize(data.float(), p = 2, dim = -1, eps = 1.0e-6).to(data.dtype)
-    #norm = torch.norm(data.float(), p=2, dim=-1, keepdim=True)
-    #return data / (norm.to(data.dtype) + 1e-6)  # Adding small epsilon to avoid division by zero
+    return F.normalize(data, p = 2, dim = -1, eps = 1.0e-6)
 
 def norm_layer(module : nn.Module):
     """

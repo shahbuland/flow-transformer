@@ -48,17 +48,18 @@ def patch_pool(x : TensorType["b", "n", "d"], config : ModelConfig):
     return pooled
 
 class REPA(nn.Module):
-    def __init__(self, config : ModelConfig, dino_path = "facebook/dinov2-small"):
+    def __init__(self, config : ModelConfig, dino_path = "facebook/dinov2-giant"):
         super().__init__()
 
         self.pool_factor = config.repa_pool_factor
+        self.normalized = config.normalized
 
         self.dino = AutoModel.from_pretrained(dino_path)
         self.dino.to(device='cuda',dtype=torch.half)
         self.mlp = MLP(
             config.d_model * (self.pool_factor ** 2),
             dim_out=self.dino.config.hidden_size,
-            use_scale = True,
+            use_scale = self.normalized,
             d_middle = config.d_model * 4
         )
         self.batch_size = config.repa_batch_size
@@ -66,7 +67,7 @@ class REPA(nn.Module):
         self.patch_pool = None
         if self.pool_factor > 1:
             self.patch_pool = lambda x: patch_pool(x, config)
-    
+
         freeze(self.dino)
 
     @torch.no_grad()
@@ -84,6 +85,19 @@ class REPA(nn.Module):
 
         return h_all.to(x.dtype)
 
+    def feature_cos_sim(self, x, y):
+        x = F.normalize(x, dim = -1)
+        y = F.normalize(y, dim = -1)
+        cos_sims = torch.einsum('bnd,bnd->bn', x, y)
+        return -cos_sims.mean()
+    
+    def feature_mse(self, x, y):
+        x = F.normalize(x)
+        y = F.normalize(y)
+
+        # both [b,n,d]
+        return F.mse_loss(x, y)
+
     def forward(self, x, features):
         # x [b,c,h,w]
         # features [b,n,d]
@@ -96,11 +110,9 @@ class REPA(nn.Module):
         # now both [b,n,d] in the same space
 
         #return F.mse_loss(h, h_rft)
-
-        h = F.normalize(h, p = 2, dim = -1)
-        h_rft = F.normalize(h_rft, p = 2, dim = -1)
-
-        cos_sims = torch.einsum('bnd,bnd->bn', h, h_rft)
-        return -cos_sims.mean() # maximize cos_sims -> minimize -cos_sims
+        #if self.normalized:
+        return self.feature_cos_sim(h, h_rft)
+        #else:
+            #return self.feature_mse(h, h_rft)
 
 

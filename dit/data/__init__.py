@@ -26,5 +26,5 @@ def create_loader(dataset_name, batch_size, image_size, deterministic=True, spli
         shuffle=True if split == 'train' else False,
         generator=generator,
         pin_memory = True,
-        num_workers = 4
+        num_workers = 8
     )

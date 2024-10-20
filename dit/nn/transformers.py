@@ -1,9 +1,10 @@
 from torchtyping import TensorType
 import torch
 from torch import nn
+import torch.nn.functional as F
 import einops as eo
 
-from .normalization import RMSNorm, Norm, LayerNorm
+from .normalization import RMSNorm, norm, LayerNorm
 from .modulation import DoubleModBlock, SimpleModulation
 from .embeddings import RoPEEmbedding, RoPE2D
 from .mlp import MLP
@@ -26,58 +27,52 @@ def head_merge(x, flash = False):
     else:
         return eo.rearrange(x, 'b h n d -> b n (h d)')
 
-class MultiHeadAttention(nn.Module):
-    def __init__(self, dim, n_heads):
-        super().__init__()
-
-        self.n_heads = n_heads
-        self.scale = (dim // n_heads) ** .5 # NGPT -> Not divided
-
-    def forward(self, q, k, v):
-        # [b, h, n, d] for all 3
-        scores = torch.einsum('bhnd,bhmd->bhnm', q, k) * self.scale
-        scores = torch.softmax(scores, dim = -1) # [b, h, n_in, n_out]
-        out = torch.einsum('bhnm,bhmd->bhmd', scores, v)
-        return out
-
 class Attn(nn.Module):
-    def __init__(self, n_heads : int, d_model : int, flash : bool = False, cross : bool = False):
+    def __init__(self, config):
         super().__init__()
+        
+        d_model = config.d_model
+        n_heads = config.n_heads
+        self.flash = config.flash
+        self.cross = config.take_label
+        self.normalized = config.normalized
 
         self.qkv = nn.Linear(d_model, 3 * d_model, bias = False)
         self.out = nn.Linear(d_model, d_model)
 
-        self.head_split = lambda x: head_split(x, n_heads = n_heads, flash = flash)
-        self.head_merge = lambda x: head_merge(x, flash = flash)
+        self.head_split = lambda x: head_split(x, n_heads = n_heads, flash = self.flash)
+        self.head_merge = lambda x: head_merge(x, flash = self.flash)
 
-        if cross:
+        if self.cross:
             self.cross_qkv = nn.Linear(d_model, 3 * d_model, bias = False)
-            #self.cross_q_norm = RMSNorm(d_model // n_heads)
-            #self.cross_k_norm = RMSNorm(d_model // n_heads)
+            if not self.normalized:
+                self.cross_q_norm = RMSNorm(d_model // n_heads)
+                self.cross_k_norm = RMSNorm(d_model // n_heads)
 
-        self.norm = Norm()
-        #self.q_norm = RMSNorm(d_model // n_heads)
-        #self.k_norm = RMSNorm(d_model // n_heads)
+        if not self.normalized:
+            self.q_norm = RMSNorm(d_model // n_heads)
+            self.k_norm = RMSNorm(d_model // n_heads)
 
         self.scale_init = 1
         self.scale_scale = d_model ** -.5
 
-        self.scale = nn.Parameter(torch.full((n_heads, d_model // n_heads), self.scale_scale))
+        if self.normalized:
+            self.scale = nn.Parameter(torch.full((n_heads, d_model // n_heads), self.scale_scale))
+            if self.cross:
+                self.cross_scale = nn.Parameter(torch.full((n_heads, d_model // n_heads), self.scale_scale))
 
-        if cross:
-            self.cross_scale = nn.Parameter(torch.full((n_heads, d_model // n_heads), self.scale_scale))
+        self.rope = RoPEEmbedding(d_model // n_heads, flash = self.flash)
 
-        self.rope = RoPEEmbedding(d_model // n_heads, flash = flash)
+        if self.normalized:
+            self.attn_scale = (d_model // n_heads) ** .5
+        else:
+            self.attn_scale = (d_model // n_heads) ** -.5
 
-        self.cross = cross
-        self.flash = flash
-        self.attn_scale = (d_model // n_heads) ** .5
-
-        if flash:
+        if self.flash:
             from flash_attn import flash_attn_func
             self.attn = flash_attn_func
         else:
-            self.attn = MultiHeadAttention(d_model, n_heads)
+            self.attn = F.scaled_dot_product_attention
 
     def get_scale(self):
         scale = (self.scale * (self.scale_init / self.scale_scale))[None,None,:] # -> [b,n,h,d]
@@ -100,24 +95,25 @@ class Attn(nn.Module):
         q,k,v = contiguous_qkv_chunk(qkv)
         q,k,v = [self.head_split(i) for i in [q,k,v]]
 
-        scaler = self.get_scale()
-
-        q = self.norm(q) * scaler
-        k = self.norm(k) * scaler
-        
-        #q = self.q_norm(q)
-        #k = self.k_norm(k)
+        if self.normalized:
+            scaler = self.get_scale()
+            q = norm(q) * scaler
+            k = norm(k) * scaler
+        else:
+            q = self.q_norm(q)
+            k = self.k_norm(k)
 
         if self.cross:
             cross_qkv = self.cross_qkv(c)
             c_q, c_k, c_v = [self.head_split(i) for i in contiguous_qkv_chunk(cross_qkv)]
             
-            cross_scaler = self.get_cross_scale()
-            c_q = self.norm(c_q) * cross_scaler
-            c_k = self.norm(c_k) * cross_scaler
-            
-            #c_q = self.cross_q_norm(c_q)
-            #c_k = self.cross_k_norm(c_k)
+            if self.normalized:
+                cross_scaler = self.get_cross_scale()
+                c_q = norm(c_q) * cross_scaler
+                c_k = norm(c_k) * cross_scaler
+            else:
+                c_q = self.cross_q_norm(c_q)
+                c_k = self.cross_k_norm(c_k)
 
             # note flash is [b n h d], otherwise [b h n d]
             if self.flash:
@@ -152,24 +148,24 @@ class DiTBlock(nn.Module):
     n_heads = config.n_heads
     flash = config.flash
     cross_attn = config.take_label
+    self.normalized = config.normalized
 
-    self.mod = DoubleModBlock(d_model, normalized = True)
+    self.mod = DoubleModBlock(d_model, normalized = config.normalized)
 
-    self.attn = Attn(n_heads, d_model, flash, cross_attn)
-    self.mlp = MLP(d_model)
+    self.attn = Attn(config)
+    self.mlp = MLP(d_model, use_scale = self.normalized)
 
     self.cross = cross_attn
 
-    self.norm = Norm()
-
-    #self.norm_1 = LayerNorm(d_model)
-    #self.norm_2 = LayerNorm(d_model)
-
-    self.alpha_init = 1 / config.n_layers  # In the order of 1/n_layers
-    self.alpha_scale = d_model ** -.5
-    
-    self.alpha_attn = nn.Parameter(torch.full((d_model,), self.alpha_scale))
-    self.alpha_mlp = nn.Parameter(torch.full((d_model,), self.alpha_scale))
+    if not self.normalized:
+        self.norm_1 = LayerNorm(d_model)
+        self.norm_2 = LayerNorm(d_model)
+    else:
+        self.alpha_init = 1 / config.n_layers  # In the order of 1/n_layers
+        self.alpha_scale = d_model ** -.5
+        
+        self.alpha_attn = nn.Parameter(torch.full((d_model,), self.alpha_scale))
+        self.alpha_mlp = nn.Parameter(torch.full((d_model,), self.alpha_scale))
 
   def get_alpha_attn(self):
     return (self.alpha_attn * (self.alpha_init / self.alpha_scale))[None,None,:]
@@ -182,34 +178,34 @@ class DiTBlock(nn.Module):
 
     resid_1 = x.clone() # h
     
-    #x = self.norm_1(x)
-    #x = mod1.first_step(x)
-    
-    #x = self.norm(mod1.first_step(self.norm(x)))
+    if not self.normalized:
+        x = self.norm_1(x)
     x = mod1.first_step(x)
 
     if self.cross:
         attn_out = self.attn(x, c)
     else:
-        attn_out = self.attn(x)
-    
+        attn_out = self.attn(x)    
 
-    attn_out = mod1.second_step(self.norm(attn_out)) # h_A
-    #attn_out = mod1.second_step(attn_out)
+    attn_out = mod1.second_step(attn_out) # h_A
 
-    x = self.norm(resid_1 + self.get_alpha_attn() * (attn_out - resid_1))
-    #x = resid_1 + mod1.second_step(attn_out)
+    if self.normalized:
+        x = norm(resid_1 + self.get_alpha_attn() * (attn_out - resid_1))
+    else:
+        x = resid_1 + mod1.second_step(attn_out)
+
+    if not self.normalized:
+        x = self.norm_2(x)
 
     resid_2 = x.clone()
 
-    #x = self.norm(mod2.first_step(self.norm(x)))
     x = mod2.first_step(x)
-    
     x = self.mlp(x)
-
     x = mod2.second_step(x) # h_M
-    #x = mod2.second_step(x)
 
-    x = self.norm(resid_2 + self.get_alpha_mlp() * (x - resid_2))
-    #x = resid_2 + x
+    if self.normalized:
+        x = norm(resid_2 + self.get_alpha_mlp() * (x - resid_2))
+    else:
+        x = resid_2 + x
+
     return x

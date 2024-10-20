@@ -15,7 +15,7 @@ from .nn.embeddings import TimestepEmbedding, AbsEmbedding, SphericalAdditiveLay
 from .nn.modulation import SimpleModulation
 from .nn.transformers import DiTBlock
 from .nn.text_embedder import TextEmbedder
-from .nn.normalization import Norm, RMSNorm, norm_layer, norm_dit_block, norm
+from .nn.normalization import Norm, RMSNorm, norm_layer, norm_dit_block, norm, LayerNorm
 from .nn.repa import REPA
 
 class RFTCore(nn.Module):
@@ -30,6 +30,7 @@ class RFTCore(nn.Module):
     patch_size = config.patch_size
     sample_size = config.sample_size
     channels = config.channels
+    self.normalized = config.normalized
 
     self.t_embedder = TimestepEmbedding(d_model)
 
@@ -51,6 +52,9 @@ class RFTCore(nn.Module):
       self.text_proj = nn.Linear(self.config.text_d_model, d_model)
       #freeze(self.text_proj)
     
+    if not self.normalized:
+      self.final_norm = LayerNorm(d_model)
+
     self.proj_out = nn.Linear(d_model, patch_content)
     self.final_mod = SimpleModulation(d_model, normalized = True)
 
@@ -81,6 +85,9 @@ class RFTCore(nn.Module):
       x = layer(x, t, c)
       if output_hidden_states:
         h.append(x)
+
+    if not self.normalized:
+      x = self.final_norm(x)
 
     x = self.final_mod(x, t)
     x = self.proj_out(x)
@@ -118,6 +125,8 @@ class RectFlowTransformer(nn.Module):
     return self.text_embedder.encode_text(*args, **kwargs)
   
   def normalize(self):
+    if not self.config.normalized:
+      return
     if self.repa is not None:
       norm_layer(self.repa.mlp.fc1)
       norm_layer(self.repa.mlp.fc2)
@@ -158,20 +167,23 @@ class RectFlowTransformer(nn.Module):
 
     extra = {}
 
-    x, h = self.denoise(lerpd, t, ctx, output_hidden_states=True)
-    extra['last_hidden'] = h[-2]
+    pred, h = self.denoise(lerpd, t, ctx, output_hidden_states=True)
+    extra['last_hidden'] = h[-1]
 
-    diff_loss = ((x - target) ** 2).mean()
-    extra['diff_loss'] = diff_loss
-    total_loss = diff_loss
+    total_loss = 0.
+
+    diff_loss = F.mse_loss(target, pred)
+    extra['diff_loss'] = diff_loss.item()
+    total_loss += diff_loss
 
     if self.training:
       if self.repa is None:
         repa_loss = 0.
+        extra['repa_loss'] = 0.
       else:
         repa_loss = self.repa(x_orig, h[self.config.repa_layer_ind])
-      total_loss += repa_loss * self.config.repa_weight
-      extra['repa_loss'] = repa_loss
+        total_loss += repa_loss * self.config.repa_weight
+        extra['repa_loss'] = repa_loss.item()
 
     return total_loss, extra
 

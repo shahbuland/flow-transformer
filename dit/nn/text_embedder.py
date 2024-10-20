@@ -9,15 +9,14 @@ class TextEmbedder(nn.Module):
         self.model = CLIPTextModel.from_pretrained("openai/clip-vit-base-patch32")
         self.tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-base-patch32")
 
-        self.cuda()
-        self.half()
-
     def tokenize(self, text_list):
         return self.tokenizer(text_list, padding='max_length', max_length = 77, truncation=True, return_tensors="pt")
 
     def forward(self, input_ids, attention_mask):
-        input_ids = input_ids.to('cuda')
-        attention_mask = attention_mask.to('cuda')
+        device = next(self.model.parameters()).device
+
+        input_ids = input_ids.to(device)
+        attention_mask = attention_mask.to(device)
 
         outputs = self.model(input_ids=input_ids, attention_mask=attention_mask, output_hidden_states = True)
         hidden_states = outputs.hidden_states[-2]  # Second last hidden state

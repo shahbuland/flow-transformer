@@ -9,7 +9,7 @@ class MLP(nn.Module):
   this model essentially processes each word individually,
   i.e. information flow from input to output is only within words, not between them
   """
-  def __init__(self, dim, dim_out = None, d_middle = None, use_scale = True):
+  def __init__(self, dim, dim_out = None, d_middle = None, use_scale = False):
     super().__init__()
     if dim_out is None:
       dim_out = dim

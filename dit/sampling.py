@@ -64,7 +64,6 @@ class CFGSampler:
         n_steps = self.config.n_steps
         guidance_scale = self.config.cfg_scale
 
-
         assert prompts is not None, "Prompts cannot be None for CFGSampler"
         assert len(prompts) == n_samples, "Number of prompts must match number of samples"
 
@@ -79,7 +78,6 @@ class CFGSampler:
         timesteps = self.scheduler.timesteps / 1000
         sigmas = self.scheduler.sigmas
 
-        torch.manual_seed(0)
         noisy = torch.randn(*sample_shape)
 
         device = next(model.parameters()).device

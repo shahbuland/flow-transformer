@@ -6,12 +6,12 @@ import einops as eo
 import math
 
 from .vae import VAE
-from .utils import freeze, truncated_normal_init, mimetic_init, normal_init
+from .utils import freeze, truncated_normal_init, mimetic_init, normal_init, log2
 
 from rotary_embedding_torch import RotaryEmbedding
 
 from .configs import ModelConfig
-from .nn.embeddings import TimestepEmbedding, AbsEmbedding, SphericalAdditiveLayer
+from .nn.embeddings import TimestepEmbedding, AbsEmbedding, SphericalAdditiveLayer, StepEmbedding
 from .nn.modulation import SimpleModulation
 from .nn.transformers import DiTBlock
 from .nn.text_embedder import TextEmbedder
@@ -33,6 +33,7 @@ class RFTCore(nn.Module):
     self.normalized = config.normalized
 
     self.t_embedder = TimestepEmbedding(d_model)
+    self.d_embedder = StepEmbedding(d_model)
 
     n_patches = (sample_size // patch_size) ** 2
     self.pos_enc = AbsEmbedding(n_patches, d_model)
@@ -68,7 +69,13 @@ class RFTCore(nn.Module):
     for layer in self.layers:
       norm_dit_block(layer)
 
-  def forward(self, x, t, c=None, output_hidden_states=False):
+  def forward(self, x, t, c=None, d=None, output_hidden_states=False):
+    """
+    x [b,c,h,w] image
+    t [b,] timesteps
+    c [b,n_text,d_text] text embeddings
+    d [b,] step multiplier (0) 
+    """
     if c is not None:
       c = self.text_proj(c)
       if self.normalized:
@@ -81,6 +88,8 @@ class RFTCore(nn.Module):
       x = norm(x)
 
     t = self.t_embedder(t)
+    d = self.d_embedder(d)
+    t = t + d
 
     h = []
     for layer in self.layers:
@@ -134,7 +143,40 @@ class RectFlowTransformer(nn.Module):
       norm_layer(self.repa.mlp.fc2)
     self.core.normalize()
 
-  def forward(self, x):
+  @torch.no_grad()
+  def generate_sc_targets(self, x):
+    if self.config.take_label:
+      x, ctx = x
+      ctx = self.text_embedder.encode_text(ctx)
+      ctx = ctx.to(x.dtype).to(x.device)
+    else:
+      ctx = None
+
+    if self.vae is not None:
+      x = self.vae.encode(x)
+
+    # Mostly the same, but we sample steps first then sample time based on those
+    b,c,h,w = x.shape
+    z = torch.randn_like(x)
+    d = torch.randint(1, log2(self.config.), (b,), device=x.device)
+    two_d = (d - 1)
+    d = torch.pow(2, d).to(x.dtype)
+    dt = 1. / d
+    two_d = torch.pow(2, two_d).to(x.dtype)
+    
+    t = sample_discrete_timesteps(two_d)
+    t_exp = eo.repeat(t, 'b -> b c h w', c = c, h = h, w = w) # Makes it the same shape as x and z so we can multiply
+    lerpd = x * (1 - t_exp) + z * t_exp
+    
+    model_pred_1 = self.denoise(lerpd, t, ctx, d)
+    lerpd_2 = lerpd + dt * model_pred_1
+
+    model_pred_2 = self.denoise(lerpd_2, t+dt, ctx, d)
+    sc_target = (model_pred_1 + model_pred_2) / 2
+
+    return lerpd, sc_target, t, ctx, two_d
+
+  def forward(self, x, sc_targets = None):
     if self.config.take_label:
       x, ctx = x # c is list str
       if self.config.cfg_prob > 0:
@@ -157,7 +199,9 @@ class RectFlowTransformer(nn.Module):
     # prepare target and input
     with torch.no_grad():
       z = torch.randn_like(x) # Noise we will lerp with
-      t = torch.randn(b, device = x.device, dtype = x.dtype).sigmoid() # log norm timesteps
+      #t = torch.randn(b, device = x.device, dtype = x.dtype).sigmoid() # log norm timesteps
+      t = torch.rand(b, device = x.device, dtype = x.dtype) # U(0,1)
+      d = torch.full((b,), self.config.max_steps, device=x.device, dtype=x.dtype)
 
       # exp here means expanded
       t_exp = eo.repeat(t, 'b -> b c h w', c = c, h = h, w = w) # Makes it the same shape as x and z so we can multiply
@@ -169,7 +213,7 @@ class RectFlowTransformer(nn.Module):
 
     extra = {}
 
-    pred, h = self.denoise(lerpd, t, ctx, output_hidden_states=True)
+    pred, h = self.denoise(lerpd, t, ctx, d, output_hidden_states=True)
     extra['last_hidden'] = h[-1]
 
     total_loss = 0.
@@ -179,6 +223,14 @@ class RectFlowTransformer(nn.Module):
     total_loss += diff_loss
 
     if self.training:
+      if self.config.sc_weight > 0 and sc_targets is not None:
+        sc_inputs, sc_targets, sc_t, sc_ctx, sc_d = sc_targets
+        sc_pred = self.denoise(sc_inputs, sc_t, sc_ctx, sc_d)
+        sc_loss = F.mse_loss(sc_targets, sc_pred)
+        extra['sc_loss'] = sc_loss.item()
+
+        total_loss += self.config.sc_weight * sc_loss
+
       if self.repa is None:
         repa_loss = 0.
         extra['repa_loss'] = 0.
@@ -189,8 +241,8 @@ class RectFlowTransformer(nn.Module):
 
     return total_loss, extra
 
-  def denoise(self, x, t, c = None, output_hidden_states = False):
-    return self.core(x,t,c,output_hidden_states)
+  def denoise(self, x, t, c = None, steps = None, output_hidden_states = False):
+    return self.core(x,t,c,steps,output_hidden_states)
 
 if __name__ == "__main__":
     import torch

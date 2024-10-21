@@ -28,6 +28,11 @@ class ModelConfig:
     repa_layer_ind : int = 4
     repa_pool_factor : int = 1 # If 256 patches, matching dinov2small, set to 1, if doing 1024, set to 2
 
+    # Shortcut models
+    sc_weight : float = 0.0
+    sc_batch_frac : float = 0.25 # What percentage of training batch?
+    base_steps : int = 128
+
 @dataclass
 class TrainConfig:
     dataset : str = "coco"

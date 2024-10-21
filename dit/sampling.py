@@ -13,7 +13,8 @@ class Sampler:
         self.config = config
 
     @torch.no_grad()
-    def sample(self, n_samples, model, prompts = None, n_steps = 40):
+    def sample(self, n_samples, model, prompts = None):
+        n_steps = self.config.n_steps
         c = None
         if prompts is not None:
             assert len(prompts) == n_samples
@@ -21,10 +22,13 @@ class Sampler:
             
         sample_shape = (model.config.channels, model.config.sample_size, model.config.sample_size)
         sample_shape = (n_samples,) + sample_shape
-        self.scheduler.set_timesteps(n_steps)
+        #self.scheduler.set_timesteps(n_steps)
 
-        timesteps = self.scheduler.timesteps / 1000
-        sigmas = self.scheduler.sigmas
+        timesteps = torch.linspace(1, 0, n_steps + 1)[:-1]
+        dt = -1/n_steps
+
+        #timesteps = self.scheduler.timesteps / 1000
+        #sigmas = self.scheduler.sigmas
 
         noisy = torch.randn(*sample_shape)
 
@@ -35,14 +39,14 @@ class Sampler:
         # Move noisy, timesteps, and sigmas to the same device and dtype as the model
         noisy = noisy.to(device=device, dtype=dtype)
         timesteps = timesteps.to(device=device, dtype=dtype)
-        sigmas = sigmas.to(device=device, dtype=dtype)
+        #sigmas = sigmas.to(device=device, dtype=dtype)
 
         if c is not None:
             c = c.to(device=device, dtype=dtype)
 
         for i, t in enumerate(timesteps):
-            dt = sigmas[i+1] - sigmas[i]
-            pred = model.denoise(noisy, t, c)
+            #dt = sigmas[i+1] - sigmas[i]
+            pred = model.denoise(noisy, t, c, self.config.n_steps)
             noisy += pred * dt
         
         if model.vae is None:
@@ -73,10 +77,12 @@ class CFGSampler:
             
         sample_shape = (model.config.channels, model.config.sample_size, model.config.sample_size)
         sample_shape = (n_samples,) + sample_shape
-        self.scheduler.set_timesteps(n_steps)
+        #self.scheduler.set_timesteps(n_steps)
 
-        timesteps = self.scheduler.timesteps / 1000
-        sigmas = self.scheduler.sigmas
+        timesteps = torch.linspace(1,0,n_steps+1)[:-1]
+        dt = -1/n_steps
+        #timesteps = self.scheduler.timesteps / 1000
+        #sigmas = self.scheduler.sigmas
 
         noisy = torch.randn(*sample_shape)
 
@@ -85,16 +91,16 @@ class CFGSampler:
 
         noisy = noisy.to(device=device, dtype=dtype)
         timesteps = timesteps.to(device=device, dtype=dtype)
-        sigmas = sigmas.to(device=device, dtype=dtype)
+        #sigmas = sigmas.to(device=device, dtype=dtype)
         c = c.to(device=device, dtype=dtype)
 
         for i, t in tqdm(enumerate(timesteps)):
-            dt = sigmas[i+1] - sigmas[i]
+            #dt = sigmas[i+1] - sigmas[i]
             
             # 2. Double the noisy tensor along the batch dimension
             noisy_doubled = torch.cat([noisy, noisy], dim=0)
             
-            pred = model.denoise(noisy_doubled, t, c)
+            pred = model.denoise(noisy_doubled, t, c, self.config.n_steps)
             
             # 3. Slice to get conditional and unconditional predictions
             pred_cond, pred_uncond = pred.chunk(2)

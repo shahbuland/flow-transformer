@@ -7,6 +7,7 @@ from rotary_embedding_torch import RotaryEmbedding
 
 from .mlp import MLP
 from .normalization import norm
+from ..utils import log2
 
 class AbsEmbedding(nn.Module):
     def __init__(self, seq_len, dim):
@@ -116,17 +117,18 @@ class RoPE2D(nn.Module):
         return q,k    
 
 class TimestepEmbedding(nn.Module):
-    def __init__(self, d_out, d_in = 512):
+    def __init__(self, d_out, d_in = 512, mult = 1000):
         super().__init__()
 
         self.mlp = MLP(d_in, d_out, use_scale = False)
         self.d = d_in # Assume this is even
+        self.mult = mult
 
     def forward(self, t):
         if t.ndim == 0:
             t = t.unsqueeze(0)
         # t is [B] tensor of timesteps ()
-        t = t * 1000
+        t = t * self.mult
 
         max_period = 10000 # This seems to always be assumed in all repos
         half = self.d // 2
@@ -140,3 +142,31 @@ class TimestepEmbedding(nn.Module):
         embs = torch.cat([torch.cos(embs), torch.sin(embs)], dim = -1)
 
         return self.mlp(embs)
+    
+class StepEmbedding(nn.Module):
+    def __init__(self, d_out, d_in = 512):
+        super().__init__()
+
+        self.mlp = MLP(d_in, d_out, use_scale = False)
+        self.d = d_in
+
+    def forward(self, steps):
+        if steps.ndim == 0:
+            steps = steps.unsqueeze(0)
+
+        # steps could be 128, 64, etc. number of inference steps
+        step_powers = torch.log2(steps)
+        steps = step_powers * (1000/7) # The most it could be is 7
+
+        max_period = 10000 # This seems to always be assumed in all repos
+        half = self.d // 2
+
+        inds = torch.arange(half, device = t.device, dtype = t.dtype)
+        freqs = (
+            -math.log(max_period) * inds / half
+        ).exp()
+
+        embs = t[:,None] * freqs[None]
+        embs = torch.cat([torch.cos(embs), torch.sin(embs)], dim = -1)
+
+        return self.mlp(embs)     

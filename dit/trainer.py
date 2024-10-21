@@ -146,6 +146,7 @@ class Trainer:
             ignore_names = {'repa', 'vae', 'text_embedder'},
             coerce_dtype = True
         )
+        accel_ema = self.accelerator.prepare(self.ema)
 
         # load checkpoint if we want to 
         if self.config.resume:
@@ -158,10 +159,10 @@ class Trainer:
             wandb.watch(self.accelerator.unwrap_model(model), log = 'all')
 
         # Set up sampler (maybe with cfg)
-        if self.model_config.cfg_prob > 0.0:
-            sampler = CFGSampler()
-        else:
-            sampler = Sampler()
+        sampler = CFGSampler()
+        sampler_fast = Sampler()
+        sampler_fast.config.n_steps = 1
+
 
         # Set up validator
         validator = None
@@ -169,10 +170,19 @@ class Trainer:
             validator = Validator(self.accelerator.prepare(val_loader), self.config.batch_size * self.config.val_batch_mult)
         scorer = PickScorer(self.config.batch_size * self.config.val_batch_mult)
 
+        # Indices seperating shortcut batch
+        sc_k = int((1 - self.model_config.sc_batch_frac) * self.config.batch_size)
+
         for epoch in range(self.config.epochs):
             for i, batch in enumerate(loader):
                 with self.accelerator.accumulate(model):
-                    loss, extra = model(batch)
+                    (batch_x, batch_ctx) = batch
+                    batch_1 = (batch_x[:sc_k], batch_ctx[:sc_k])
+                    batch_2 = (batch_x[sc_k:], batch_ctx[sc_k:])
+
+                    sc_targets = self.accelerator.unwrap_model(accel_ema).generate_sc_targets(batch_2)
+                    #sc_targets = None
+                    loss, extra = model(batch_1, sc_targets)
                     
                     self.accelerator.backward(loss)
 
@@ -200,6 +210,8 @@ class Trainer:
                         }
                         if self.model_config.repa_weight > 0:
                             wandb_dict['repa_loss'] = extra['repa_loss']
+                        if self.model_config.sc_weight > 0:
+                            wandb_dict['sc_loss'] = extra['sc_losss']
                         if scheduler:
                             wandb_dict["learning_rate"] = scheduler.get_last_lr()[0]
                         if should['sample']:

@@ -3,6 +3,31 @@ from torch.optim.lr_scheduler import _LRScheduler
 import torch
 from torch import nn
 import einops as eo 
+import math
+
+# Shortcut model specific things
+
+def log2(x):
+    return math.log(x, 2)
+
+def sample_discrete_timesteps(n_steps):
+    """
+    Sample timestamps that make sense given n_steps
+    """
+    # n_steps is a [b,] tensor of values like [1, 2, 4, 8, 16, ...]
+    b = n_steps.shape[0]
+    
+    # Generate possible timesteps for each batch element
+    possible_timesteps = torch.stack([torch.arange(0, n, 1, device=n_steps.device) / n for n in n_steps])
+    
+    # Sample a random timestep for each batch element
+    t = torch.randint(0, n_steps, (b,), device=n_steps.device)
+    sampled_timesteps = torch.gather(possible_timesteps, 1, t.unsqueeze(1)).squeeze(1)
+    
+    # Convert [0...1] to (0...1] (0 is useless cause model has nothing to do)
+    return 1 - sampled_timesteps
+    
+# ===============================
 
 def count_parameters(model):
     """

@@ -3,10 +3,14 @@ import wandb
 import einops as eo
 from torchtyping import TensorType
 import torch
+from tqdm import tqdm
+
+from .configs import SamplerConfig
 
 class Sampler:
-    def __init__(self):
+    def __init__(self, config : SamplerConfig):
         self.scheduler = FlowMatchEulerDiscreteScheduler(shift=3)
+        self.config = config
 
     @torch.no_grad()
     def sample(self, n_samples, model, prompts = None, n_steps = 40):
@@ -48,11 +52,18 @@ class Sampler:
 
 
 class CFGSampler:
-    def __init__(self):
+    def __init__(self, config : SamplerConfig = SamplerConfig()):
         self.scheduler = FlowMatchEulerDiscreteScheduler(shift=3)
+        self.config = config
 
     @torch.no_grad()
-    def sample(self, n_samples, model, prompts, n_steps=40, guidance_scale=1.5):
+    def sample(self, n_samples = None, model = None, prompts = None):
+        if n_samples is None:
+            n_samples = len(prompts)
+
+        n_steps = self.config.n_steps
+        guidance_scale = self.config.cfg_scale
+
         assert prompts is not None, "Prompts cannot be None for CFGSampler"
         assert len(prompts) == n_samples, "Number of prompts must match number of samples"
 
@@ -77,7 +88,7 @@ class CFGSampler:
         sigmas = sigmas.to(device=device, dtype=dtype)
         c = c.to(device=device, dtype=dtype)
 
-        for i, t in enumerate(timesteps):
+        for i, t in tqdm(enumerate(timesteps)):
             dt = sigmas[i+1] - sigmas[i]
             
             # 2. Double the noisy tensor along the batch dimension
@@ -93,7 +104,7 @@ class CFGSampler:
             
             # 5. Update noisy
             noisy += v * dt
-        
+
         if model.vae is None:
             return noisy
         else:
@@ -111,5 +122,8 @@ def to_wandb_image(x : TensorType["c", "h", "w"], caption : str = ""):
     x = x.detach().cpu().numpy()
     return wandb.Image(x, caption = caption)
 
-def to_wandb_batch(x):
-    return [to_wandb_image(x_i) for x_i in x]
+def to_wandb_batch(x, captions = None):
+    if captions is None:
+        return [to_wandb_image(x_i) for x_i in x]
+    else:
+        return [to_wandb_image(x_i, caption) for (x_i, caption) in zip(x, captions)]

@@ -8,7 +8,7 @@ from tqdm import tqdm
 from .configs import SamplerConfig
 
 class Sampler:
-    def __init__(self, config : SamplerConfig):
+    def __init__(self, config : SamplerConfig = SamplerConfig()):
         self.scheduler = FlowMatchEulerDiscreteScheduler(shift=3)
         self.config = config
 

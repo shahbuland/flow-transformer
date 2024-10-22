@@ -7,7 +7,7 @@ from dataclasses import asdict
 from ema_pytorch import EMA
 
 from .configs import TrainConfig, LoggingConfig, ModelConfig
-from .utils import get_scheduler_cls, Stopwatch, get_extra_optimizer
+from .utils import get_scheduler_cls, Stopwatch, get_extra_optimizer, sample_discrete_timesteps
 from .sampling import Sampler, CFGSampler, to_wandb_batch
 from .validation import Validator, PickScorer
 
@@ -45,8 +45,6 @@ class Trainer:
 
         self.world_size = self.accelerator.state.num_processes
         self.total_step_counter = 0
-        self.ema = None
-
         self.ema = None
 
     def get_should(self, step = None):
@@ -180,7 +178,7 @@ class Trainer:
                     batch_1 = (batch_x[:sc_k], batch_ctx[:sc_k])
                     batch_2 = (batch_x[sc_k:], batch_ctx[sc_k:])
 
-                    sc_targets = self.accelerator.unwrap_model(accel_ema).generate_sc_targets(batch_2)
+                    sc_targets = self.accelerator.unwrap_model(accel_ema).ema_model.generate_sc_targets(batch_2)
                     #sc_targets = None
                     loss, extra = model(batch_1, sc_targets)
                     
@@ -211,7 +209,7 @@ class Trainer:
                         if self.model_config.repa_weight > 0:
                             wandb_dict['repa_loss'] = extra['repa_loss']
                         if self.model_config.sc_weight > 0:
-                            wandb_dict['sc_loss'] = extra['sc_losss']
+                            wandb_dict['sc_loss'] = extra['sc_loss']
                         if scheduler:
                             wandb_dict["learning_rate"] = scheduler.get_last_lr()[0]
                         if should['sample']:
@@ -220,8 +218,13 @@ class Trainer:
                                 sampler.sample(n_samples, self.ema.ema_model, self.config.sample_prompts),
                                 self.config.sample_prompts
                             )
+                            images_fast = to_wandb_batch(
+                                sampler_fast.sample(n_samples, self.ema.ema_model, self.config.sample_prompts),
+                                self.config.sample_prompts
+                            )
                             wandb_dict.update({
-                                "samples": images
+                                "samples": images,
+                                "samples_fast" : images_fast
                             })
                         wandb.log(wandb_dict)
                         sw.reset()

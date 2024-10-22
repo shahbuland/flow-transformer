@@ -6,7 +6,7 @@ import einops as eo
 import math
 
 from .vae import VAE
-from .utils import freeze, truncated_normal_init, mimetic_init, normal_init, log2
+from .utils import freeze, truncated_normal_init, mimetic_init, normal_init, log2, sample_discrete_timesteps
 
 from rotary_embedding_torch import RotaryEmbedding
 
@@ -57,7 +57,7 @@ class RFTCore(nn.Module):
       self.final_norm = LayerNorm(d_model)
 
     self.proj_out = nn.Linear(d_model, patch_content)
-    self.final_mod = SimpleModulation(d_model, normalized = True)
+    self.final_mod = SimpleModulation(d_model, normalized = False)
 
     truncated_normal_init(self.pos_enc)
       
@@ -158,18 +158,22 @@ class RectFlowTransformer(nn.Module):
     # Mostly the same, but we sample steps first then sample time based on those
     b,c,h,w = x.shape
     z = torch.randn_like(x)
-    d = torch.randint(1, log2(self.config.), (b,), device=x.device)
+    d = torch.randint(1, round(log2(self.config.base_steps)), (b,), device=x.device)
     two_d = (d - 1)
     d = torch.pow(2, d).to(x.dtype)
-    dt = 1. / d
+
+    dt = -(1. / d)
+
     two_d = torch.pow(2, two_d).to(x.dtype)
     
     t = sample_discrete_timesteps(two_d)
     t_exp = eo.repeat(t, 'b -> b c h w', c = c, h = h, w = w) # Makes it the same shape as x and z so we can multiply
-    lerpd = x * (1 - t_exp) + z * t_exp
+    dt_exp = eo.repeat(dt, 'b -> b c h w', c=c,h=h,w=w)
+    lerpd = x * (1. - t_exp) + z * t_exp
     
     model_pred_1 = self.denoise(lerpd, t, ctx, d)
-    lerpd_2 = lerpd + dt * model_pred_1
+
+    lerpd_2 = lerpd + dt_exp * model_pred_1
 
     model_pred_2 = self.denoise(lerpd_2, t+dt, ctx, d)
     sc_target = (model_pred_1 + model_pred_2) / 2
@@ -201,7 +205,7 @@ class RectFlowTransformer(nn.Module):
       z = torch.randn_like(x) # Noise we will lerp with
       #t = torch.randn(b, device = x.device, dtype = x.dtype).sigmoid() # log norm timesteps
       t = torch.rand(b, device = x.device, dtype = x.dtype) # U(0,1)
-      d = torch.full((b,), self.config.max_steps, device=x.device, dtype=x.dtype)
+      d = torch.full((b,), self.config.base_steps, device=x.device, dtype=x.dtype)
 
       # exp here means expanded
       t_exp = eo.repeat(t, 'b -> b c h w', c = c, h = h, w = w) # Makes it the same shape as x and z so we can multiply

@@ -29,15 +29,15 @@ class ModelConfig:
     repa_pool_factor : int = 1 # If 256 patches, matching dinov2small, set to 1, if doing 1024, set to 2
 
     # Shortcut models
-    sc_weight : float = 0.0
+    sc_weight : float = 1.0
     sc_batch_frac : float = 0.25 # What percentage of training batch?
     base_steps : int = 128
 
 @dataclass
 class TrainConfig:
     dataset : str = "coco"
-    target_batch_size : int = 256
-    batch_size : int = 256
+    target_batch_size : int = 340
+    batch_size : int = 170
     epochs : int = 100
     # optimizer
     opt : str = "AdamW"

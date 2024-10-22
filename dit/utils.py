@@ -15,18 +15,20 @@ def sample_discrete_timesteps(n_steps):
     Sample timestamps that make sense given n_steps
     """
     # n_steps is a [b,] tensor of values like [1, 2, 4, 8, 16, ...]
-    b = n_steps.shape[0]
+
+    # This code is weird so I will explain:
+    # For each n_steps value n:
+    # - generate possible values as a range from 0 to 1 in n_steps, excluding 1
+    # - i.e. if n = 2, linspace(0,1) -> [0,1] which is wrong, we want [0, 0.5]
+    # - then select random value from this range
+    # - t = 0 is useless, it means image isn't noised, so do 1 - t
     
     # Generate possible timesteps for each batch element
-    possible_timesteps = torch.stack([torch.arange(0, n, 1, device=n_steps.device) / n for n in n_steps])
-    
-    # Sample a random timestep for each batch element
-    t = torch.randint(0, n_steps, (b,), device=n_steps.device)
-    sampled_timesteps = torch.gather(possible_timesteps, 1, t.unsqueeze(1)).squeeze(1)
-    
-    # Convert [0...1] to (0...1] (0 is useless cause model has nothing to do)
-    return 1 - sampled_timesteps
-    
+    def _round(n):
+        return round(n.item())
+    t = [torch.linspace(0,1,steps=_round(n)+1)[:-1][torch.randint(0, _round(n), (1,))] for n in n_steps]
+    return 1 - torch.tensor(t, device = n_steps.device, dtype = n_steps.dtype)
+
 # ===============================
 
 def count_parameters(model):

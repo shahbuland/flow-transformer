@@ -151,6 +151,8 @@ class StepEmbedding(nn.Module):
         self.d = d_in
 
     def forward(self, steps):
+        if not isinstance(steps, torch.Tensor):
+            steps = torch.tensor(steps, device=self.mlp.fc1.weight.device, dtype=torch.float32)
         if steps.ndim == 0:
             steps = steps.unsqueeze(0)
 
@@ -161,12 +163,12 @@ class StepEmbedding(nn.Module):
         max_period = 10000 # This seems to always be assumed in all repos
         half = self.d // 2
 
-        inds = torch.arange(half, device = t.device, dtype = t.dtype)
+        inds = torch.arange(half, device = steps.device, dtype = steps.dtype)
         freqs = (
             -math.log(max_period) * inds / half
         ).exp()
 
-        embs = t[:,None] * freqs[None]
+        embs = steps[:,None] * freqs[None]
         embs = torch.cat([torch.cos(embs), torch.sin(embs)], dim = -1)
 
         return self.mlp(embs)     

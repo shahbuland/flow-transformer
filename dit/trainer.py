@@ -180,7 +180,7 @@ class Trainer:
                     batch_1 = (batch_x[:sc_k], batch_ctx[:sc_k])
                     batch_2 = (batch_x[sc_k:], batch_ctx[sc_k:])
 
-                    if sc_k == self.config.batch_size or self.model_config.sc_weight == 0:
+                    if sc_k == self.config.batch_size or self.model_config.sc_weight == 0 or len(batch_2[0]) == 0:
                         sc_targets = None
                     else:
                         sc_targets = self.accelerator.unwrap_model(accel_ema).ema_model.generate_sc_targets(batch_2)

@@ -10,6 +10,23 @@ import math
 def log2(x):
     return math.log(x, 2)
 
+def sample_step_size(batch_size, max_steps = 128):
+    """
+    Excluding 2^0, samples possible step sizes, i.e. 2, 4, ... 128
+    Return type is [b,] tensor
+    """
+    # Calculate the number of possible step sizes (excluding 2^0)
+    num_options = int(log2(max_steps))
+    
+    # Generate possible step sizes: 2^1, 2^2, ..., 2^log2(max_steps)
+    possible_steps = torch.tensor([2**i for i in range(1, num_options + 1)])
+    
+    # Sample from possible steps with replacement
+    sampled_steps = torch.randint(0, num_options, (batch_size,))
+    
+    # Convert sampled indices to actual step sizes
+    return possible_steps[sampled_steps]
+
 def sample_discrete_timesteps(n_steps):
     """
     Sample timestamps that make sense given n_steps
@@ -38,7 +55,7 @@ def count_parameters(model):
     Args:
         model (nn.Module): The PyTorch model to analyze.
     """
-    total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    total_params = sum(p.numel() for p in model.core.parameters() if p.requires_grad)
     return total_params
 
 def pretty_print_parameters(model):

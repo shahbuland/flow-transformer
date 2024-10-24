@@ -25,7 +25,7 @@ class Sampler:
         #self.scheduler.set_timesteps(n_steps)
 
         timesteps = torch.linspace(1, 0, n_steps + 1)[:-1]
-        dt = -1/n_steps
+        dt = -1./n_steps
 
         #timesteps = self.scheduler.timesteps / 1000
         #sigmas = self.scheduler.sigmas

@@ -193,8 +193,6 @@ class DiTBlock(nn.Module):
         x = norm(resid_1 + self.get_alpha_attn() * (attn_out - resid_1))
     else:
         x = resid_1 + mod1.second_step(attn_out)
-
-    if not self.normalized:
         x = self.norm_2(x)
 
     resid_2 = x.clone()

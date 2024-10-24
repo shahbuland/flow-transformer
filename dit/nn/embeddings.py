@@ -7,7 +7,7 @@ from rotary_embedding_torch import RotaryEmbedding
 
 from .mlp import MLP
 from .normalization import norm
-from ..utils import log2
+from ..utils import log2, truncated_normal_init
 
 class AbsEmbedding(nn.Module):
     def __init__(self, seq_len, dim):
@@ -144,31 +144,25 @@ class TimestepEmbedding(nn.Module):
         return self.mlp(embs)
     
 class StepEmbedding(nn.Module):
-    def __init__(self, d_out, d_in = 512):
+    def __init__(self, d_out, d_in = 512, max_steps = 128):
         super().__init__()
 
         self.mlp = MLP(d_in, d_out, use_scale = False)
         self.d = d_in
 
+        # if max_steps = 128, [1,2,...,128] = 8 diff options
+        # log2(128) = 7
+        different_d = round(log2(max_steps) + 1)
+        self.features = nn.Parameter(torch.randn(different_d, d_in))
+
     def forward(self, steps):
         if not isinstance(steps, torch.Tensor):
-            steps = torch.tensor(steps, device=self.mlp.fc1.weight.device, dtype=torch.float32)
+            steps = torch.tensor(steps, device=self.mlp.fc1.weight.device, dtype=self.mlp.fc1.weight.dtype)
         if steps.ndim == 0:
             steps = steps.unsqueeze(0)
 
         # steps could be 128, 64, etc. number of inference steps
-        step_powers = torch.log2(steps)
-        steps = step_powers * (1000/7) # The most it could be is 7
-
-        max_period = 10000 # This seems to always be assumed in all repos
-        half = self.d // 2
-
-        inds = torch.arange(half, device = steps.device, dtype = steps.dtype)
-        freqs = (
-            -math.log(max_period) * inds / half
-        ).exp()
-
-        embs = steps[:,None] * freqs[None]
-        embs = torch.cat([torch.cos(embs), torch.sin(embs)], dim = -1)
+        step_powers = torch.log2(steps).floor().long().clamp(0, self.features.shape[0] - 1) # [b]
+        embs = self.features[step_powers] # [b,d]
 
         return self.mlp(embs)     

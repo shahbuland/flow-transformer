@@ -6,7 +6,10 @@ import einops as eo
 import math
 
 from .vae import VAE
-from .utils import freeze, truncated_normal_init, mimetic_init, normal_init, log2, sample_discrete_timesteps
+from .utils import (
+  freeze, truncated_normal_init, mimetic_init, normal_init,
+  log2, sample_discrete_timesteps, sample_step_size
+)
 
 from rotary_embedding_torch import RotaryEmbedding
 
@@ -33,7 +36,7 @@ class RFTCore(nn.Module):
     self.normalized = config.normalized
 
     self.t_embedder = TimestepEmbedding(d_model)
-    self.d_embedder = StepEmbedding(d_model)
+    self.d_embedder = StepEmbedding(d_model, max_steps = self.config.base_steps)
 
     n_patches = (sample_size // patch_size) ** 2
     self.pos_enc = AbsEmbedding(n_patches, d_model)
@@ -64,6 +67,10 @@ class RFTCore(nn.Module):
   def normalize(self):
     norm_layer(self.text_proj)
     norm_layer(self.proj_in)
+    norm_layer(self.t_embedder.mlp.fc1)
+    norm_layer(self.t_embedder.mlp.fc2)
+    norm_layer(self.d_embedder.mlp.fc1)
+    norm_layer(self.d_embedder.mlp.fc2)
     #self.pos_enc.normalize()
     #norm_layer(self.proj_out)
     for layer in self.layers:
@@ -87,9 +94,9 @@ class RFTCore(nn.Module):
     if self.normalized:
       x = norm(x)
 
-    t = self.t_embedder(t)
-    d = self.d_embedder(d)
-    t = t + d
+    t = norm(self.t_embedder(t))
+    d = norm(self.d_embedder(d))
+    t = norm(t + d)
 
     h = []
     for layer in self.layers:
@@ -129,8 +136,11 @@ class RectFlowTransformer(nn.Module):
     if config.repa_weight > 0.0:
       self.repa = REPA(self.config)
 
-  def parameters(self):
-    return self.core.parameters() # Only return what we need
+  def grouped_parameters(self):
+    res = list(self.core.parameters())
+    if self.repa is not None:
+      res += list(self.repa.mlp.parameters())
+    return res
   
   def encode_text(self, *args, **kwargs):
     return self.text_embedder.encode_text(*args, **kwargs)
@@ -158,27 +168,31 @@ class RectFlowTransformer(nn.Module):
     # Mostly the same, but we sample steps first then sample time based on those
     b,c,h,w = x.shape
     z = torch.randn_like(x)
+
     d = torch.randint(1, round(log2(self.config.base_steps)), (b,), device=x.device)
-    two_d = (d - 1)
-    d = torch.pow(2, d).to(x.dtype)
-
-    dt = -(1. / d)
-
-    two_d = torch.pow(2, two_d).to(x.dtype)
     
-    t = sample_discrete_timesteps(two_d)
-    t_exp = eo.repeat(t, 'b -> b c h w', c = c, h = h, w = w) # Makes it the same shape as x and z so we can multiply
-    dt_exp = eo.repeat(dt, 'b -> b c h w', c=c,h=h,w=w)
-    lerpd = x * (1. - t_exp) + z * t_exp
-    
-    model_pred_1 = self.denoise(lerpd, t, ctx, d)
+    d_slow = sample_step_size(b, self.config.base_steps).to(device=x.device,dtype=x.dtype)
+    d_fast = d_slow / 2 # half as may steps -> faster
 
-    lerpd_2 = lerpd + dt_exp * model_pred_1
+    dt_slow = -1./d_slow
+    dt_fast = -1./d_fast
 
-    model_pred_2 = self.denoise(lerpd_2, t+dt, ctx, d)
-    sc_target = (model_pred_1 + model_pred_2) / 2
+    # Since this t will be input to model being trained to do fast, 
+    # use timesteps that make sense for step faster
+    t = sample_discrete_timesteps(d_fast)
 
-    return lerpd, sc_target, t, ctx, two_d
+    x_exp = lambda x: eo.repeat(x, 'b -> b c h w',c=c,h=h,w=w)
+    t_exp = x_exp(t)
+    dt_exp = x_exp(dt_slow)
+
+    # Sample slow to create target for training fast
+    noisy = x * (1. - t_exp) + z * t_exp
+    pred_1 = self.denoise(noisy, t, ctx, d_slow)
+    less_noisy = noisy + dt_exp * pred_1
+    pred_2 = self.denoise(less_noisy, t + dt_slow, ctx, d_slow)
+
+    sc_target = 0.5 * (pred_1 + pred_2) # avg two slow predictions
+    return noisy, sc_target, t, ctx, d_fast
 
   def forward(self, x, sc_targets = None):
     if self.config.take_label:
@@ -235,10 +249,7 @@ class RectFlowTransformer(nn.Module):
 
         total_loss += self.config.sc_weight * sc_loss
 
-      if self.repa is None:
-        repa_loss = 0.
-        extra['repa_loss'] = 0.
-      else:
+      if self.repa is not None:
         repa_loss = self.repa(x_orig, h[self.config.repa_layer_ind])
         total_loss += repa_loss * self.config.repa_weight
         extra['repa_loss'] = repa_loss.item()

@@ -117,6 +117,7 @@ class Trainer:
             opt_class = getattr(torch.optim, self.config.opt)
         except:
             opt_class = get_extra_optimizer(self.config.opt)
+
         opt = opt_class(model.parameters(), **self.config.opt_kwargs)
 
         # scheduler setup
@@ -159,7 +160,7 @@ class Trainer:
         # Set up sampler (maybe with cfg)
         sampler = CFGSampler()
         sampler_fast = Sampler()
-        sampler_fast.config.n_steps = 1
+        sampler_fast.config.n_steps = sampler_fast.config.fast_steps
 
 
         # Set up validator
@@ -169,7 +170,8 @@ class Trainer:
         scorer = PickScorer(self.config.batch_size * self.config.val_batch_mult)
 
         # Indices seperating shortcut batch
-        sc_k = int((1 - self.model_config.sc_batch_frac) * self.config.batch_size)
+        sc_k_base = int((1 - self.model_config.sc_batch_frac) * self.config.batch_size)
+        sc_k = sc_k_base if self.model_config.delay_sc == 0 else self.config.batch_size
 
         for epoch in range(self.config.epochs):
             for i, batch in enumerate(loader):
@@ -178,8 +180,11 @@ class Trainer:
                     batch_1 = (batch_x[:sc_k], batch_ctx[:sc_k])
                     batch_2 = (batch_x[sc_k:], batch_ctx[sc_k:])
 
-                    sc_targets = self.accelerator.unwrap_model(accel_ema).ema_model.generate_sc_targets(batch_2)
-                    #sc_targets = None
+                    if sc_k == self.config.batch_size or self.model_config.sc_weight == 0:
+                        sc_targets = None
+                    else:
+                        sc_targets = self.accelerator.unwrap_model(accel_ema).ema_model.generate_sc_targets(batch_2)
+
                     loss, extra = model(batch_1, sc_targets)
                     
                     self.accelerator.backward(loss)
@@ -194,8 +199,11 @@ class Trainer:
 
                     if self.accelerator.sync_gradients:
                         self.total_step_counter += 1
-                        self.accelerator.unwrap_model(model).normalize()
+                        if self.model_config.normalized: self.accelerator.unwrap_model(model).normalize()
                         self.ema.update()
+                        if sc_k == self.config.batch_size:
+                            if self.total_step_counter >= self.model_config.delay_sc:
+                                sc_k = sc_k_base
 
                     should = self.get_should()
                     if self.logging_config is not None and should['log'] or should['sample']:
@@ -206,9 +214,9 @@ class Trainer:
                             "last_hidden_max": extra['last_hidden'].max(),
                             "last_hidden_mean": extra['last_hidden'].mean()
                         }
-                        if self.model_config.repa_weight > 0:
+                        if 'repa_loss' in extra:
                             wandb_dict['repa_loss'] = extra['repa_loss']
-                        if self.model_config.sc_weight > 0:
+                        if 'sc_loss' in extra:
                             wandb_dict['sc_loss'] = extra['sc_loss']
                         if scheduler:
                             wandb_dict["learning_rate"] = scheduler.get_last_lr()[0]

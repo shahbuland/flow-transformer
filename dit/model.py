@@ -136,6 +136,8 @@ class RectFlowTransformer(nn.Module):
     if config.repa_weight > 0.0:
       self.repa = REPA(self.config)
 
+    self.empty_embed = self.encode_text([""]) # [1,n,d]
+
   def grouped_parameters(self):
     res = list(self.core.parameters())
     if self.repa is not None:
@@ -159,6 +161,7 @@ class RectFlowTransformer(nn.Module):
       x, ctx = x
       ctx = self.text_embedder.encode_text(ctx)
       ctx = ctx.to(x.dtype).to(x.device)
+      neg_ctx = self.empty_embed.repeat(x.shape[0],1,1).to(x.dtype).to(x.device)
     else:
       ctx = None
 
@@ -168,10 +171,9 @@ class RectFlowTransformer(nn.Module):
     # Mostly the same, but we sample steps first then sample time based on those
     b,c,h,w = x.shape
     z = torch.randn_like(x)
-
-    d = torch.randint(1, round(log2(self.config.base_steps)), (b,), device=x.device)
     
     d_slow = sample_step_size(b, self.config.base_steps).to(device=x.device,dtype=x.dtype)
+    cfg_mask = (d_slow == 128).float()[:,None,None,None]
     d_fast = d_slow / 2 # half as may steps -> faster
 
     dt_slow = -1./d_slow
@@ -188,8 +190,21 @@ class RectFlowTransformer(nn.Module):
     # Sample slow to create target for training fast
     noisy = x * (1. - t_exp) + z * t_exp
     pred_1 = self.denoise(noisy, t, ctx, d_slow)
+    if cfg_mask.any():
+      pred_1_neg = self.denoise(noisy, t, neg_ctx, d_slow)
+      pred_1 = torch.where(
+        cfg_mask,
+        pred_1_neg + self.config.sc_cfg * (pred_1 - pred_1_neg),
+        pred_1
+      )
+    
     less_noisy = noisy + dt_exp * pred_1
     pred_2 = self.denoise(less_noisy, t + dt_slow, ctx, d_slow)
+    if cfg_mask.any():
+      pred_2_neg = self.denoise(noisy,t+dt_slow,neg_ctx,d_slow)
+      pred_2 = torch.where(
+        pred_2_neg + self.config.sc_cfg * (pred_2 - pred_2_neg)
+      )
 
     sc_target = 0.5 * (pred_1 + pred_2) # avg two slow predictions
     return noisy, sc_target, t, ctx, d_fast

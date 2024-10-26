@@ -144,16 +144,13 @@ class TimestepEmbedding(nn.Module):
         return self.mlp(embs)
     
 class StepEmbedding(nn.Module):
-    def __init__(self, d_out, d_in = 512, max_steps = 128):
+    def __init__(self, d_out, d_in=512, max_steps=128):
         super().__init__()
 
-        self.mlp = MLP(d_in, d_out, use_scale = False)
+        self.mlp = MLP(d_in, d_out, use_scale=False)
         self.d = d_in
-
-        # if max_steps = 128, [1,2,...,128] = 8 diff options
-        # log2(128) = 7
-        different_d = round(log2(max_steps) + 1)
-        self.features = nn.Parameter(torch.randn(different_d, d_in))
+        self.max_steps = max_steps
+        self.mult = 1000 / math.log2(max_steps)
 
     def forward(self, steps):
         if not isinstance(steps, torch.Tensor):
@@ -161,8 +158,17 @@ class StepEmbedding(nn.Module):
         if steps.ndim == 0:
             steps = steps.unsqueeze(0)
 
-        # steps could be 128, 64, etc. number of inference steps
-        step_powers = torch.log2(steps).floor().long().clamp(0, self.features.shape[0] - 1) # [b]
-        embs = self.features[step_powers] # [b,d]
+        # Map steps to [0, log2(max_steps)]
+        t = math.log2(self.max_steps) - torch.log2(steps.float())
+        # Scale to [0, 1000]
+        t = t * self.mult
 
-        return self.mlp(embs)     
+        half = self.d // 2
+        freqs = torch.exp(
+            -math.log(10000) * torch.arange(half, device=t.device, dtype=t.dtype) / half
+        )
+
+        embs = t[:, None] * freqs[None]
+        embs = torch.cat([torch.cos(embs), torch.sin(embs)], dim=-1)
+
+        return self.mlp(embs)

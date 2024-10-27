@@ -30,8 +30,9 @@ class ModelConfig:
 
     # Shortcut models
     sc_weight : float = 1.0
+    sc_cfg : float = 3.5
     sc_batch_frac : float = 0.25 # What percentage of training batch?
-    delay_sc : int = 1500 # Delay sc to this many steps after training starts
+    delay_sc : int = 0 # Delay sc to this many steps after training starts
     base_steps : int = 128
 
 @dataclass
@@ -91,16 +92,15 @@ class TrainConfig:
     val_batch_mult = 4
 
     grad_clip : float = -1 # Clip grad norms to this value
-    normalize_every : int = 1
     
 @dataclass
 class LoggingConfig:
-    run_name : str = "coco 150M (+ngpt, +early_ema, +split_LR)"
+    run_name : str = "coco 150M (+ln,+init)"
     wandb_entity : str = "shahbuland"
     wandb_project : str = "mnist_sanity"
 
 @dataclass
 class SamplerConfig:
     n_steps : int = 128
-    cfg_scale : float = 1.5
-    fast_steps : int = 2
+    cfg_scale : float = 3.5
+    fast_steps : int = 1

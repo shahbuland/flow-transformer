@@ -6,8 +6,8 @@ from torchtyping import TensorType
 import einops as eo
 
 from .mlp import MLP
-from ..configs import ModelConfig
-from ..utils import freeze
+from dit.configs import ModelConfig
+from dit.utils import freeze
 
 def dino_proc(x: TensorType["b", "c", "h", "w"]):
     """

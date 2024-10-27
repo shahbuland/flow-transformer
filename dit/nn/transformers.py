@@ -4,7 +4,10 @@ from torch import nn
 import torch.nn.functional as F
 import einops as eo
 
-from .normalization import RMSNorm, norm, LayerNorm
+from .normalization import (
+    RMSNorm, LayerNorm, norm
+    ScalingLayer, HeadScalingLayer, NormalizedLerp
+)
 from .modulation import DoubleModBlock, SimpleModulation
 from .embeddings import RoPEEmbedding, RoPE2D
 from .mlp import MLP
@@ -53,13 +56,10 @@ class Attn(nn.Module):
             self.q_norm = RMSNorm(d_model // n_heads)
             self.k_norm = RMSNorm(d_model // n_heads)
 
-        self.scale_init = 1
-        self.scale_scale = d_model ** -.5
-
         if self.normalized:
-            self.scale = nn.Parameter(torch.full((n_heads, d_model // n_heads), self.scale_scale))
+            self.scale = HeadScalingLayer(n_heads, d_model, 1, d_model ** -.5)
             if self.cross:
-                self.cross_scale = nn.Parameter(torch.full((n_heads, d_model // n_heads), self.scale_scale))
+                self.cross_scale = HeadScalingLayer(n_heads, d_model, 1, d_model ** -.5)
 
         self.rope = RoPEEmbedding(d_model // n_heads, flash = self.flash)
 
@@ -73,18 +73,6 @@ class Attn(nn.Module):
             self.attn = flash_attn_func
         else:
             self.attn = F.scaled_dot_product_attention
-
-    def get_scale(self):
-        scale = (self.scale * (self.scale_init / self.scale_scale))[None,None,:] # -> [b,n,h,d]
-        if not self.flash:
-            scale = scale.transpose(1,2) # -> [b,h,n,d]
-        return scale
-
-    def get_cross_scale(self):
-        scale = (self.cross_scale * (self.scale_init / self.scale_scale))[None,None,:] # -> [b,n,h,d]
-        if not self.flash:
-            scale = scale.transpose(1,2) # -> [b,h,n,d]
-        return scale
             
     def forward(self, x, c = None):
         # x [b,n,d]
@@ -96,9 +84,8 @@ class Attn(nn.Module):
         q,k,v = [self.head_split(i) for i in [q,k,v]]
 
         if self.normalized:
-            scaler = self.get_scale()
-            q = norm(q) * scaler
-            k = norm(k) * scaler
+            q = self.scale(norm(q))
+            k = self.scale(norm(k))
         else:
             q = self.q_norm(q)
             k = self.k_norm(k)
@@ -109,8 +96,8 @@ class Attn(nn.Module):
             
             if self.normalized:
                 cross_scaler = self.get_cross_scale()
-                c_q = norm(c_q) * cross_scaler
-                c_k = norm(c_k) * cross_scaler
+                c_q = self.cross_scale(norm(c_q))
+                c_k = self.cross_scale(norm(c_k))
             else:
                 c_q = self.cross_q_norm(c_q)
                 c_k = self.cross_k_norm(c_k)
@@ -157,21 +144,11 @@ class DiTBlock(nn.Module):
 
     self.cross = cross_attn
 
-    if not self.normalized:
-        self.norm_1 = LayerNorm(d_model)
-        self.norm_2 = LayerNorm(d_model)
-    else:
-        self.alpha_init = 1 / config.n_layers  # In the order of 1/n_layers
-        self.alpha_scale = d_model ** -.5
-        
-        self.alpha_attn = nn.Parameter(torch.full((d_model,), self.alpha_scale))
-        self.alpha_mlp = nn.Parameter(torch.full((d_model,), self.alpha_scale))
-
-  def get_alpha_attn(self):
-    return (self.alpha_attn * (self.alpha_init / self.alpha_scale))[None,None,:]
-
-  def get_alpha_mlp(self):
-    return (self.alpha_mlp * (self.alpha_init / self.alpha_scale))[None,None,:]
+    self.norm_1 = LayerNorm(d_model)
+    self.norm_2 = LayerNorm(d_model)
+    if self.normalized:
+        self.lerp_attn = NormalizedLerp(d_model, 0.05, d_model ** -.5)
+        self.lerp_mlp = NormalizedLerp(d_model, 0.05, d_model ** -.5)
 
   def forward(self, x : TensorType["b", "n", "d"], t_emb : TensorType["b", "d"], c = None):
     mod1, mod2 = self.mod(t_emb)
@@ -180,6 +157,8 @@ class DiTBlock(nn.Module):
     
     if not self.normalized:
         x = self.norm_1(x)
+
+    x = self.norm_1(x)
     x = mod1.first_step(x)
 
     if self.cross:
@@ -190,19 +169,20 @@ class DiTBlock(nn.Module):
     attn_out = mod1.second_step(attn_out) # h_A
 
     if self.normalized:
-        x = norm(resid_1 + self.get_alpha_attn() * (attn_out - resid_1))
+        x = self.lerp_attn(x, resid_1)
     else:
         x = resid_1 + mod1.second_step(attn_out)
         x = self.norm_2(x)
 
     resid_2 = x.clone()
 
+    x = self.norm_2(x)
     x = mod2.first_step(x)
     x = self.mlp(x)
     x = mod2.second_step(x) # h_M
 
     if self.normalized:
-        x = norm(resid_2 + self.get_alpha_mlp() * (x - resid_2))
+        x = self.lerp_mlp(x, resid_2)
     else:
         x = resid_2 + x
 

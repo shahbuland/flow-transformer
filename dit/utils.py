@@ -262,6 +262,31 @@ def normal_init(module: nn.Module, std: float = 0.02):
     for p in module.parameters():
         nn.init.normal_(p, mean=0.0, std=std)
 
+# Init used for normalized gpt
+def ngpt_init(module : 'RFTCore'):
+    std = module.config.d_model ** -.5
+    # Initialize normalized parameters
+    for layer in module.layers:
+        # DiTBlock components
+        nn.init.normal_(layer.attn.qkv.weight, mean=0.0, std=std)
+        nn.init.normal_(layer.attn.out.weight, mean=0.0, std=std)
+        if layer.attn.cross:
+            nn.init.normal_(layer.attn.cross_qkv.weight, mean=0.0, std=std)
+        nn.init.normal_(layer.mlp.uv.weight, mean=0.0, std=std)
+        nn.init.normal_(layer.mlp.out.weight, mean=0.0, std=std)
+
+    # Core components
+    nn.init.normal_(module.proj_in.weight, mean=0.0, std=std)
+    nn.init.normal_(module.t_embedder.mlp.uv.weight, mean=0.0, std=std)
+    nn.init.normal_(module.t_embedder.mlp.out.weight, mean=0.0, std=std)
+    nn.init.normal_(module.d_embedder.mlp.uv.weight, mean=0.0, std=std)
+    nn.init.normal_(module.d_embedder.mlp.out.weight, mean=0.0, std=std)
+    nn.init.normal_(module.pool_embedder.uv.weight, mean=0.0, std=std)
+    nn.init.normal_(module.pool_embedder.out.weight, mean=0.0, std=std)
+
+    if module.config.take_label:
+        nn.init.normal_(module.text_proj.weight, mean=0.0, std=std)
+        
 # Optimizers stuff
 from .soap import SOAP
 

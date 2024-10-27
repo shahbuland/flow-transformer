@@ -8,7 +8,8 @@ import math
 from .vae import VAE
 from .utils import (
   freeze, truncated_normal_init, mimetic_init, normal_init,
-  log2, sample_discrete_timesteps, sample_step_size
+  log2, sample_discrete_timesteps, sample_step_size,
+  ngpt_init
 )
 
 from rotary_embedding_torch import RotaryEmbedding
@@ -20,6 +21,7 @@ from .nn.transformers import DiTBlock
 from .nn.text_embedder import TextEmbedder
 from .nn.normalization import Norm, RMSNorm, norm_layer, norm_dit_block, norm, LayerNorm
 from .nn.repa import REPA
+from .nn.mlp import MLP
 
 class RFTCore(nn.Module):
   def __init__(self, config: ModelConfig = ModelConfig()):
@@ -37,6 +39,7 @@ class RFTCore(nn.Module):
 
     self.t_embedder = TimestepEmbedding(d_model)
     self.d_embedder = StepEmbedding(d_model, max_steps = self.config.base_steps)
+    self.pool_embedder = MLP(self.config.text_d_model, d_model, use_scale = False)
 
     n_patches = (sample_size // patch_size) ** 2
     self.pos_enc = AbsEmbedding(n_patches, d_model)
@@ -55,22 +58,21 @@ class RFTCore(nn.Module):
     if self.config.take_label: 
       self.text_proj = nn.Linear(self.config.text_d_model, d_model)
       #freeze(self.text_proj)
-    
-    if not self.normalized:
-      self.final_norm = LayerNorm(d_model)
 
+    self.final_norm = LayerNorm(d_model)
     self.proj_out = nn.Linear(d_model, patch_content)
     self.final_mod = SimpleModulation(d_model, normalized = False)
 
+    ngpt_init(self)
     truncated_normal_init(self.pos_enc)
       
   def normalize(self):
     norm_layer(self.text_proj)
     norm_layer(self.proj_in)
-    norm_layer(self.t_embedder.mlp.fc1)
-    norm_layer(self.t_embedder.mlp.fc2)
-    norm_layer(self.d_embedder.mlp.fc1)
-    norm_layer(self.d_embedder.mlp.fc2)
+    norm_layer(self.t_embedder.mlp.uv)
+    norm_layer(self.t_embedder.mlp.out)
+    norm_layer(self.d_embedder.mlp.uv)
+    norm_layer(self.d_embedder.mlp.out)
     #self.pos_enc.normalize()
     #norm_layer(self.proj_out)
     for layer in self.layers:
@@ -84,6 +86,7 @@ class RFTCore(nn.Module):
     d [b,] step multiplier (0) 
     """
     if c is not None:
+      c_unproj = c.clone()
       c = self.text_proj(c)
       if self.normalized:
         c = norm(c)
@@ -96,7 +99,8 @@ class RFTCore(nn.Module):
 
     t = norm(self.t_embedder(t))
     d = norm(self.d_embedder(d))
-    t = norm(t + d)
+    c_pool = norm(self.pool_embedder(c_unproj.mean(1)))
+    t = norm(t + d + c_pool)
 
     h = []
     for layer in self.layers:
@@ -104,9 +108,7 @@ class RFTCore(nn.Module):
       if output_hidden_states:
         h.append(x)
 
-    if not self.normalized:
-      x = self.final_norm(x)
-
+    x = self.final_norm(x)
     x = self.final_mod(x, t)
     x = self.proj_out(x)
     x = self.depatchify(x)
@@ -173,7 +175,7 @@ class RectFlowTransformer(nn.Module):
     z = torch.randn_like(x)
     
     d_slow = sample_step_size(b, self.config.base_steps).to(device=x.device,dtype=x.dtype)
-    cfg_mask = (d_slow == 128).float()[:,None,None,None]
+    cfg_mask = (d_slow == 128)[:,None,None,None]
     d_fast = d_slow / 2 # half as may steps -> faster
 
     dt_slow = -1./d_slow
@@ -203,7 +205,9 @@ class RectFlowTransformer(nn.Module):
     if cfg_mask.any():
       pred_2_neg = self.denoise(noisy,t+dt_slow,neg_ctx,d_slow)
       pred_2 = torch.where(
-        pred_2_neg + self.config.sc_cfg * (pred_2 - pred_2_neg)
+        cfg_mask,
+        pred_2_neg + self.config.sc_cfg * (pred_2 - pred_2_neg),
+        pred_2
       )
 
     sc_target = 0.5 * (pred_1 + pred_2) # avg two slow predictions

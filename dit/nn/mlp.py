@@ -1,6 +1,8 @@
 import torch
 from torch import nn
 
+from .normalization import ScalingLayer
+
 class MLP(nn.Module):
   """
   Multilayer perceptron
@@ -16,18 +18,21 @@ class MLP(nn.Module):
     if d_middle is None:
       d_middle = 4 * dim
 
-    self.fc1 = nn.Linear(dim, 4 * dim) # hiddden size in transformer MLPs is normally 4x the input size
-    self.act = nn.GELU()
-    self.fc2 = nn.Linear(4 * dim, dim_out)
+    self.uv = nn.Linear(dim, 4 * dim) # hiddden size in transformer MLPs is normally 4x the input size
+    self.act = nn.SiLU()
+    self.out = nn.Linear(2 * dim, dim_out)
 
-    if use_scale:
-        self.scale = nn.Parameter(torch.zeros(4*dim))
     self.use_scale = use_scale
-    self.v_scale = dim ** .5
+    if self.use_scale:
+      self.scale_u = ScalingLayer(2*dim, 1, 1)
+      self.scale_v = ScalingLayer(2*dim, 1, 1)
+      self.scale_v_extra = dim ** .5
 
   def forward(self, x):
-    x = self.fc1(x) 
-    if self.use_scale: x *= (1. + self.scale)[None,None,:] * self.v_scale
-    x = self.act(x)
-    x = self.fc2(x)
+    u,v = self.uv(x).chunk(2,dim=-1)
+    if self.use_scale:
+      u = self.scale_u(u)
+      v = self.scale_v(v) * self.scale_v_extra
+    
+    x = self.out(u * self.act(v))
     return x

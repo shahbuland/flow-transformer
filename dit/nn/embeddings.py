@@ -120,7 +120,7 @@ class TimestepEmbedding(nn.Module):
     def __init__(self, d_out, d_in = 512, mult = 1000):
         super().__init__()
 
-        self.mlp = MLP(d_in, d_out, use_scale = False)
+        self.mlp = MLP(d_in, d_out)
         self.d = d_in # Assume this is even
         self.mult = mult
 
@@ -147,7 +147,7 @@ class StepEmbedding(nn.Module):
     def __init__(self, d_out, d_in=512, max_steps=128):
         super().__init__()
 
-        self.mlp = MLP(d_in, d_out, use_scale=False)
+        self.mlp = MLP(d_in, d_out)
         self.d = d_in
         self.max_steps = max_steps
         self.mult = 1000 / math.log2(max_steps)

@@ -3,7 +3,7 @@ import torch
 from torch import nn
 
 class TextEmbedder(nn.Module):
-    def __init__(self, dim):
+    def __init__(self, dim = None):
         super().__init__()
 
         self.model = CLIPTextModel.from_pretrained("openai/clip-vit-base-patch32")

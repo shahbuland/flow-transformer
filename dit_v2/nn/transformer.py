@@ -60,7 +60,7 @@ class Attn(nn.Module):
         k = torch.cat([k, c_k], 1)
         v = torch.cat([v, c_v], 1)
 
-        #q, k = self.rope(q,k)
+        q, k = self.rope(q,k)
 
         attn_out = self.attn_func(q.to(torch.bfloat16), k.to(torch.bfloat16), v.to(torch.bfloat16)).to(q.dtype)
         attn_out = self.merge(attn_out)

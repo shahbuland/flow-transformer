@@ -27,7 +27,7 @@ class RFTCore(nn.Module):
 
         n_patches = config.sample_size // config.patch_size
         patch_content = config.patch_size * config.patch_size * config.channels
-        #self.pos_enc = AbsEmbedding(n_patches**2, config.d_model)
+        self.pos_enc = AbsEmbedding(n_patches**2, config.d_model)
 
         self.proj_out = nn.Linear(config.d_model, patch_content)
         self.text_proj = nn.Linear(config.text_d_model, config.d_model)
@@ -58,7 +58,7 @@ class RFTCore(nn.Module):
         y = self.text_proj(y)
         x = self.patch_proj(x)
         x = x.flatten(2).transpose(1,2)
-        #x = self.pos_enc(x)
+        x = self.pos_enc(x)
 
         cond = self.t_embed(ts) + self.pool_embedder(y_pool) + self.d_embedder(d)
 

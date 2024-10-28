@@ -35,12 +35,11 @@ class Attn(nn.Module):
         self.split = lambda x: head_split(x, n_heads = config.n_heads)
         self.merge = lambda x: head_merge(x)
 
-        self.cross_qkv = nn.Linear(dim, 3*dim, bias = False)
+        self.cross_kv = nn.Linear(dim, 2*dim, bias = False)
 
 
         self.q_norm = RMSNorm(dim_head)
         self.k_norm = RMSNorm(dim_head)
-        self.cross_q_norm = RMSNorm(dim_head)
         self.cross_k_norm = RMSNorm(dim_head)
 
         self.rope = RoPEEmbedding(dim_head)    
@@ -54,12 +53,10 @@ class Attn(nn.Module):
         q = self.q_norm(q)
         k = self.k_norm(k)
 
-        cross_qkv = self.cross_qkv(y)
-        c_q,c_k,c_v = [self.split(x) for x in qkv_chunk(cross_qkv)]
-        c_q = self.cross_q_norm(c_q)
+        cross_kv = self.cross_kv(y)
+        c_k,c_v = [self.split(x) for x in kv_chunk(cross_kv)]
         c_k = self.cross_k_norm(c_k)
 
-        q = torch.cat([q, c_q], 1)
         k = torch.cat([k, c_k], 1)
         v = torch.cat([v, c_v], 1)
 
@@ -67,8 +64,6 @@ class Attn(nn.Module):
 
         attn_out = self.attn_func(q.to(torch.bfloat16), k.to(torch.bfloat16), v.to(torch.bfloat16)).to(q.dtype)
         attn_out = self.merge(attn_out)
-
-        attn_out = attn_out[:,:n]
 
         return self.out(attn_out)
 
@@ -129,8 +124,8 @@ class DiTBlock(nn.Module):
         super().__init__()
 
         self.mod = DoubleModBlock(config.d_model)
-        #self.attn = Attn(config)
-        self.attn = LinearAttn(config)
+        self.attn = Attn(config)
+        #self.attn = LinearAttn(config)
         #self.mlp = MLP(config.d_model)
         self.mlp = MixFFN(config)
 

@@ -124,8 +124,8 @@ class DiTBlock(nn.Module):
         super().__init__()
 
         self.mod = DoubleModBlock(config.d_model)
-        self.attn = Attn(config)
-        #self.attn = LinearAttn(config)
+        #self.attn = Attn(config)
+        self.attn = LinearAttn(config)
         #self.mlp = MLP(config.d_model)
         self.mlp = MixFFN(config)
 

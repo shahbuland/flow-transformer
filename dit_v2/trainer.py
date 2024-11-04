@@ -234,7 +234,7 @@ class Trainer:
                         sw.reset()
                     if should['save']:
                         self.save(self.total_step_counter)
-                    if should['val'] and validator is not None:
+                    if should['val']:# and validator is not None:
                         self.ema.ema_model.eval()
                         val_loss = validator(self.ema.ema_model)
                         pick_score = scorer(sampler, self.ema.ema_model)

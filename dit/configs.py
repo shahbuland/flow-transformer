@@ -8,7 +8,7 @@ class ModelConfig:
     n_heads : int = 12
     d_model : int = 768
     flash : bool = True
-    normalized : bool = True
+    normalized : bool = False
 
     # input/latent
     image_size : int = 256
@@ -39,12 +39,12 @@ class ModelConfig:
 class TrainConfig:
     dataset : str = "coco"
     target_batch_size : int = 256
-    batch_size : int = 128
+    batch_size : int = 256
     epochs : int = 100
     # optimizer
     opt : str = "AdamW"
     opt_kwargs : Dict = field(default_factory = lambda : {
-        "lr": 1.0e-3,
+        "lr": 1.0e-4,
         "eps": 1.0e-15,
         "betas" : (0.9, 0.95),
         "weight_decay" : 0.1,
@@ -70,32 +70,32 @@ class TrainConfig:
     # Sampling
     n_samples : int = 16 # Number of samples to log each time (too many gets crowded)
     sample_prompts = [
-        "a dog in a park",
-        "the blue sky",
-        "the ocean",
-        "the beach",
-        "a beautiful rainbow feathered bird",
-        "a snowy mountain with clear skies",
-        "a woman cutting a cake",
-        "a red sports car",
-        "a colorful butterfly on a flower",
-        "a futuristic cityscape at night",
-        "a plate of delicious sushi",
-        "a cozy cabin in the woods",
-        "a majestic lion in the savanna",
-        "an astronaut floating in space",
-        "a vintage motorcycle on a desert road",
-        "a serene zen garden with a koi pond",
+        "golden retriever",
+        "tabby cat",
+        "school bus",
+        "tennis ball",
+        "acoustic guitar",
+        "monarch butterfly",
+        "great white shark",
+        "bald eagle",
+        "red panda",
+        "pineapple",
+        "fire truck",
+        "grand piano",
+        "mountain bike",
+        "polar bear",
+        "peacock",
+        "zebra"
     ]
     
     # Validating
-    val_batch_mult = 4
+    val_batch_mult = 2
 
     grad_clip : float = -1 # Clip grad norms to this value
     
 @dataclass
 class LoggingConfig:
-    run_name : str = "coco 150M (+ln,+init)"
+    run_name : str = "coco 150M (RoPE, -Abs_enc, +Linformer)"
     wandb_entity : str = "shahbuland"
     wandb_project : str = "mnist_sanity"
 

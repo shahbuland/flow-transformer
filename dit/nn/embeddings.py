@@ -120,7 +120,7 @@ class TimestepEmbedding(nn.Module):
     def __init__(self, d_out, d_in = 512, mult = 1000):
         super().__init__()
 
-        self.mlp = MLP(d_in, d_out)
+        self.mlp = MLP(d_in, d_out, use_scale = False)
         self.d = d_in # Assume this is even
         self.mult = mult
 
@@ -147,14 +147,14 @@ class StepEmbedding(nn.Module):
     def __init__(self, d_out, d_in=512, max_steps=128):
         super().__init__()
 
-        self.mlp = MLP(d_in, d_out)
+        self.mlp = MLP(d_in, d_out, use_scale = False)
         self.d = d_in
         self.max_steps = max_steps
         self.mult = 1000 / math.log2(max_steps)
 
     def forward(self, steps):
         if not isinstance(steps, torch.Tensor):
-            steps = torch.tensor(steps, device=self.mlp.fc1.weight.device, dtype=self.mlp.fc1.weight.dtype)
+            steps = torch.tensor(steps, device=self.mlp.uv.weight.device, dtype=self.mlp.uv.weight.dtype)
         if steps.ndim == 0:
             steps = steps.unsqueeze(0)
 

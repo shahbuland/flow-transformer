@@ -11,7 +11,10 @@ class RMSNorm(nn.Module):
         self.eps = eps
 
     def forward(self, x : TensorType["b", "n", "d"]):
-        gain = (1 + self.g)[None,None,:] # Add a batch and sequence dim
+        if x.dim() == 4:
+            gain = (1 + self.g)[None,None,None,:] # Add batch, sequence, and head dims
+        else:
+            gain = (1 + self.g)[None,None,:] # Add batch and sequence dims
 
         rms = (x.float().pow(2).mean(-1, keepdim = True) + self.eps).rsqrt() # [b, n]
 
@@ -58,7 +61,7 @@ class ScalingLayer(nn.Module):
     Scaling layer from normalized transformer.
     Produces some scaling value "treated" with some init and scale
     """
-    def __init__(self, d_model, init, scale):
+    def __init__(self, d_model, init, scale, extra = 1.):
         super().__init__()
 
         init = float(init)
@@ -66,6 +69,7 @@ class ScalingLayer(nn.Module):
 
         self.scale = scale
         self.init = init
+        self.extra = extra
 
         self.alpha = nn.Parameter(torch.full((d_model,), scale))
 
@@ -76,7 +80,26 @@ class ScalingLayer(nn.Module):
         else:
             alpha = alpha[None,None,:]
 
-        return alpha * x
+        return alpha * x * self.extra
+
+class ConvScaling(nn.Module):
+    def __init__(self, d_model, init, scale, extra = 1.):
+        super().__init__()
+
+        init = float(init)
+        scale = float(scale)
+
+        self.scale = scale
+        self.init = init
+        self.extra = extra
+
+        self.alpha = nn.Parameter(torch.full((d_model,), scale))
+    
+    def forward(self, x):
+        # x is [b,d,h,w]
+        alpha = (self.alpha * (self.init / self.scale))
+        alpha = alpha[None,:,None,None]
+        return alpha * x * self.extra 
 
 class HeadScalingLayer(nn.Module):
     def __init__(self, n_heads, d_model, init, scale):

@@ -10,7 +10,7 @@ def create_loader(dataset_name, batch_size, image_size, deterministic=True, spli
     if dataset_name.lower() == 'mnist':
         dataset = mnist.CustomMNISTDataset(image_size=image_size)
     elif dataset_name.lower() == 'imagenet':
-        dataset = imagenet.CustomImageNetDataset(image_size=image_size)
+        dataset = imagenet.CustomImageNetDataset(image_size=image_size, split = split)
     elif dataset_name.lower() == 'coco':
         dataset = coco.CustomCOCODataset(image_size=image_size, split = split)
     else:

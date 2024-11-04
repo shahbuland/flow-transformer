@@ -1,4 +1,4 @@
-from datasets import load_dataset
+from datasets import load_dataset, concatenate_datasets
 from torch.utils.data import Dataset
 import torch
 from torchvision import transforms
@@ -16,7 +16,7 @@ def get_transform(image_size):
 
 class CustomCOCODataset(Dataset):
     def __init__(self, image_size=512, split = 'train'):
-        self.dataset = load_dataset("HuggingFaceM4/COCO", split=split)
+        self.dataset = load_dataset("HuggingFaceM4/COCO", split = split)
         self.transform = get_transform(image_size)
 
     def __len__(self):

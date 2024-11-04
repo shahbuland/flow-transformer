@@ -15,15 +15,29 @@ def get_transform(image_size):
     ])
 
 class CustomImageNetDataset(Dataset):
-    def __init__(self, image_size=224):
-        self.dataset = load_dataset("ILSVRC/imagenet-1k", split="train", trust_remote_code=True)
+    def __init__(self, image_size=256, split = 'train'):
+        self.dataset = load_dataset("ILSVRC/imagenet-1k", split=split, trust_remote_code=True, cache_dir = "../.cache/huggingface/datasets/ILSVRC___imagenet-1k")
         self.transform = get_transform(image_size)
+        self.label_names = self.dataset.features['label'].names
 
     def __len__(self):
         return len(self.dataset)
 
     def __getitem__(self, idx):
-        image = self.dataset[idx]['image']
+        row = self.dataset[idx]
+        image = row['image']
+        label_idx = row['label']
+        label = self.label_names[label_idx]
+
         if self.transform:
             image = self.transform(image)
-        return image
+        return image, label
+
+
+if __name__ == "__main__":
+    dataset = CustomImageNetDataset(image_size=256)
+    sample, label = dataset[0]
+    print(f"Sample type: {type(sample)}")
+    print(f"Sample tensor shape: {sample.shape}")
+    print(label)
+

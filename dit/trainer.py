@@ -8,7 +8,7 @@ from ema_pytorch import EMA
 
 from .configs import TrainConfig, LoggingConfig, ModelConfig
 from .utils import get_scheduler_cls, Stopwatch, get_extra_optimizer, sample_discrete_timesteps
-from .sampling import Sampler, CFGSampler, to_wandb_batch
+from dit_v2.sampling import Sampler, CFGSampler, to_wandb_batch
 from .validation import Validator, PickScorer
 
 class Trainer:
@@ -209,10 +209,7 @@ class Trainer:
                     if self.logging_config is not None and should['log'] or should['sample']:
                         wandb_dict = {
                             "loss": extra['diff_loss'],
-                            "time_per_1k" : sw.hit(self.config.target_batch_size),
-                            "last_hidden_min": extra['last_hidden'].min(),
-                            "last_hidden_max": extra['last_hidden'].max(),
-                            "last_hidden_mean": extra['last_hidden'].mean()
+                            "time_per_1k" : sw.hit(self.config.log_interval)
                         }
                         if 'repa_loss' in extra:
                             wandb_dict['repa_loss'] = extra['repa_loss']

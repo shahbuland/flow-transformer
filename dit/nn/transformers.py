@@ -5,12 +5,12 @@ import torch.nn.functional as F
 import einops as eo
 
 from .normalization import (
-    RMSNorm, LayerNorm, norm
+    RMSNorm, LayerNorm, norm,
     ScalingLayer, HeadScalingLayer, NormalizedLerp
 )
 from .modulation import DoubleModBlock, SimpleModulation
 from .embeddings import RoPEEmbedding, RoPE2D
-from .mlp import MLP
+from .mlp import MLP, MixFFN
 from ..configs import ModelConfig
 
 
@@ -95,7 +95,6 @@ class Attn(nn.Module):
             c_q, c_k, c_v = [self.head_split(i) for i in contiguous_qkv_chunk(cross_qkv)]
             
             if self.normalized:
-                cross_scaler = self.get_cross_scale()
                 c_q = self.cross_scale(norm(c_q))
                 c_k = self.cross_scale(norm(c_k))
             else:
@@ -116,7 +115,8 @@ class Attn(nn.Module):
 
         if self.flash:
             orig_dtype = q.dtype
-            attn_out = self.attn(q.half(), k.half(), v.half(), softmax_scale = self.attn_scale).to(orig_dtype)
+            flash_attn_dtype = torch.bfloat16
+            attn_out = self.attn(q.to(flash_attn_dtype), k.to(flash_attn_dtype), v.to(flash_attn_dtype), softmax_scale = self.attn_scale).to(orig_dtype)
         else:
             attn_out = self.attn(q,k,v)
         
@@ -144,11 +144,12 @@ class DiTBlock(nn.Module):
 
     self.cross = cross_attn
 
-    self.norm_1 = LayerNorm(d_model)
-    self.norm_2 = LayerNorm(d_model)
     if self.normalized:
-        self.lerp_attn = NormalizedLerp(d_model, 0.05, d_model ** -.5)
-        self.lerp_mlp = NormalizedLerp(d_model, 0.05, d_model ** -.5)
+        self.lerp_attn = NormalizedLerp(d_model, 1/config.n_layers, d_model ** -.5)
+        self.lerp_mlp = NormalizedLerp(d_model, 1/config.n_layers, d_model ** -.5)
+    else:
+        self.norm_1 = LayerNorm(d_model)
+        self.norm_2 = LayerNorm(d_model)
 
   def forward(self, x : TensorType["b", "n", "d"], t_emb : TensorType["b", "d"], c = None):
     mod1, mod2 = self.mod(t_emb)
@@ -158,7 +159,6 @@ class DiTBlock(nn.Module):
     if not self.normalized:
         x = self.norm_1(x)
 
-    x = self.norm_1(x)
     x = mod1.first_step(x)
 
     if self.cross:
@@ -172,11 +172,12 @@ class DiTBlock(nn.Module):
         x = self.lerp_attn(x, resid_1)
     else:
         x = resid_1 + mod1.second_step(attn_out)
-        x = self.norm_2(x)
 
     resid_2 = x.clone()
 
-    x = self.norm_2(x)
+    if not self.normalized:
+        x = self.norm_2(x)
+
     x = mod2.first_step(x)
     x = self.mlp(x)
     x = mod2.second_step(x) # h_M
@@ -187,3 +188,4 @@ class DiTBlock(nn.Module):
         x = resid_2 + x
 
     return x
+

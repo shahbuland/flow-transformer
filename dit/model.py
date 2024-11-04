@@ -63,16 +63,12 @@ class RFTCore(nn.Module):
     self.proj_out = nn.Linear(d_model, patch_content)
     self.final_mod = SimpleModulation(d_model, normalized = False)
 
-    ngpt_init(self)
+    #ngpt_init(self)
     truncated_normal_init(self.pos_enc)
       
   def normalize(self):
     norm_layer(self.text_proj)
     norm_layer(self.proj_in)
-    norm_layer(self.t_embedder.mlp.uv)
-    norm_layer(self.t_embedder.mlp.out)
-    norm_layer(self.d_embedder.mlp.uv)
-    norm_layer(self.d_embedder.mlp.out)
     #self.pos_enc.normalize()
     #norm_layer(self.proj_out)
     for layer in self.layers:
@@ -153,8 +149,8 @@ class RectFlowTransformer(nn.Module):
     if not self.config.normalized:
       return
     if self.repa is not None:
-      norm_layer(self.repa.mlp.fc1)
-      norm_layer(self.repa.mlp.fc2)
+      norm_layer(self.repa.mlp.uv)
+      norm_layer(self.repa.mlp.out)
     self.core.normalize()
 
   @torch.no_grad()

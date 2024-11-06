@@ -293,3 +293,6 @@ from .soap import SOAP
 def get_extra_optimizer(name):
     if name.lower() == "soap":
         return SOAP
+    if name.lower() == "heavyball":
+        from heavyball import PalmForEachSoap
+        return PalmForEachSoap

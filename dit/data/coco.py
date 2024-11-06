@@ -16,7 +16,7 @@ def get_transform(image_size):
 
 class CustomCOCODataset(Dataset):
     def __init__(self, image_size=512, split = 'train'):
-        self.dataset = load_dataset("HuggingFaceM4/COCO", split = split)
+        self.dataset = load_dataset("HuggingFaceM4/COCO", split = split, trust_remote_code = True)
         self.transform = get_transform(image_size)
 
     def __len__(self):

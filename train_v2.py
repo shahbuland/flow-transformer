@@ -2,8 +2,8 @@ from PIL import Image
 
 import torch
 from dit.data import create_loader
-from dit_v2 .model import RectFlowTransformer
-from dit.trainer import Trainer
+from dit_v2.model import RectFlowTransformer
+from dit_v2.trainer import Trainer
 from dit.configs import ModelConfig, TrainConfig, LoggingConfig
 from dit.utils import pretty_print_parameters
 
@@ -27,7 +27,7 @@ if __name__ == "__main__":
         deterministic=True  # This will use a fixed seed internally
     )
 
-    create_loader(
+    val_loader = create_loader(
         dataset_name=train_cfg.dataset,
         batch_size=train_cfg.batch_size * train_cfg.val_batch_mult,
         image_size=model_cfg.image_size,

@@ -33,45 +33,59 @@ from torchmetrics.image.fid import FrechetInceptionDistance
 from torchvision.transforms import Resize, ToTensor
 import os
 from tqdm import tqdm
+import joblib
 
 class FIDScorer:
-    def __init__(self, validation_loader, cache_dir='./fid_cache', total_size=10000, batch_size=256, device='cuda'):
+    def __init__(self, validation_loader, cache_path='./fid_cache.pkl', total_size=10000, batch_size=256, device='cuda', n_sampling_steps : int = 32):
         self.loader = validation_loader
         self.total_size = total_size
         self.batch_size = batch_size
         self.device = device
-        self.cache_dir = cache_dir
+        self.cache_path = cache_path
+        self.n_sampling_steps = n_sampling_steps
         self.fid = FrechetInceptionDistance(feature=2048).to(device)
-        
-        if not os.path.exists(cache_dir):
-            os.makedirs(cache_dir)
-        
-        self.real_stats_file = os.path.join(cache_dir, 'real_stats.pt')
-        
-        if os.path.exists(self.real_stats_file):
-            self.fid.load_state_dict(torch.load(self.real_stats_file))
+
+        if os.path.exists(self.cache_path):
+            self.load(self.cache_path)
         else:
             self._compute_real_stats()
 
+    def load(self, path):
+        real_stats = joblib.load(path)
+        real_f_sum, real_f_cov_sum, real_f_n = real_stats
+        self.fid.real_features_sum = real_f_sum
+        self.fid.real_features_cov_sum = real_f_cov_sum
+        self.fid.real_features_num_samples = real_f_n
+        print(f"Loaded FID statistics for {real_f_n} real images from {path}")
+
+    def save(self, path):
+        real_f_sum = self.fid.real_features_sum
+        real_f_cov_sum = self.fid.real_features_cov_sum
+        real_f_n = self.fid.real_features_num_samples
+        joblib.dump([real_f_sum, real_f_cov_sum, real_f_n], path)
+
+    @torch.no_grad()
     def _compute_real_stats(self):
         print("Computing FID statistics for real images...")
-        for i, (images, _) in enumerate(tqdm(self.loader)):
-            if i * self.loader.batch_size >= self.total_size:
+        processed_samples = 0
+        all_images = []
+        self.fid.reset()
+        for images, _ in tqdm(self.loader):
+            if processed_samples >= self.total_size:
                 break
-            images = images.to(self.device)
-            self.fid.update(images, real=True)
+            images = (images * 255).byte().to(self.device)
+            self.fid.update(images, real = True)
+            processed_samples += images.shape[0]
         
-        torch.save(self.fid.state_dict(), self.real_stats_file)
+        print(f"Processed {processed_samples} real images for FID calculation.")
+        self.save(self.cache_path)
 
     @torch.no_grad()
     def __call__(self, sampler, model):
         self.fid.reset()
-
-        # Load real stats
-        self.fid.load_state_dict(torch.load(self.real_stats_file))
+        self.load(self.cache_path)
 
         print("Generating images for FID calculation...")
-        total_generated = 0
         prompts = []
         for _, batch_prompts in self.loader:
             prompts.extend(batch_prompts)
@@ -79,22 +93,29 @@ class FIDScorer:
                 prompts = prompts[:self.total_size]
                 break
 
+        print(f"Total prompts: {len(prompts)}")
+
+        all_images = []
+
+        old_steps = sampler.config.n_steps
+        sampler.config.n_steps = self.n_sampling_steps
+
         for i in tqdm(range(0, self.total_size, self.batch_size)):
             batch_size = min(self.batch_size, self.total_size - i)
             batch_prompts = prompts[i:i+batch_size]
             
             images = sampler.sample(batch_size, model, batch_prompts)
-            images = (images.clamp(-1, 1) + 1) / 2  # [-1, 1] to [0, 1]
-            
-            self.fid.update(images, real=False)
-            total_generated += batch_size
-
-        print(f"Generated {total_generated} images for FID calculation.")
+            images = (images * 255).byte().to(self.device)
+            self.fid.update(images, real = False)
+        
+        sampler.config.n_steps = old_steps
+           
         return self.fid.compute().item()
 
 
 class PickScorer:
-    def __init__(self, batch_size : int = 256, n_samples : int = None, device = 'cuda'):
+    def __init__(self, batch_size : int = 256, n_samples : int = None, device = 'cuda', n_sampling_steps : int = 32):
+        self.n_sampling_steps = n_sampling_steps
         self.proc = AutoProcessor.from_pretrained("laion/CLIP-ViT-H-14-laion2B-s32B-b79K")
         self.model = AutoModel.from_pretrained("yuvalkirstain/PickScore_v1")
 
@@ -127,6 +148,9 @@ class PickScorer:
 
     @torch.no_grad()
     def __call__(self, sampler, model):
+        old_steps = sampler.config.n_steps
+        sampler.config.n_steps = self.n_sampling_steps
+
         pick_score_total = 0.
 
         total_batches = self.n_samples // self.batch_size
@@ -148,10 +172,10 @@ class PickScorer:
             # Free up CUDA memory
             del images
             torch.cuda.empty_cache()
+        
+        sampler.config.n_steps = old_steps
 
         return pick_score_total / self.n_samples
-    
-
 
 def test_pickscore():
     class DummySampler:
@@ -173,7 +197,11 @@ def test_pickscore():
     print(f"Total PickScore: {score}")
 
 def test_fid():
+    from dit.configs import SamplerConfig
     class DummySampler:
+        def __init__(self):
+            self.config = SamplerConfig()
+
         def sample(self, batch_size, model, prompts):
             return torch.rand(batch_size, 3, 224, 224).to('cuda')
 
@@ -198,7 +226,7 @@ def test_fid():
     sampler = DummySampler()
 
     # Initialize FIDScorer
-    fid_scorer = FIDScorer(dataloader, cache_dir='./test_fid_cache', total_size=1000, batch_size=64)
+    fid_scorer = FIDScorer(dataloader, cache_path='./test_fid.pkl', total_size=10000, batch_size=64)
 
     # Test FIDScorer
     fid_score = fid_scorer(sampler, model)

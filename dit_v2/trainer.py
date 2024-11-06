@@ -6,10 +6,10 @@ import os
 from dataclasses import asdict
 from ema_pytorch import EMA
 
-from .configs import TrainConfig, LoggingConfig, ModelConfig
-from .utils import get_scheduler_cls, Stopwatch, get_extra_optimizer, sample_discrete_timesteps
+from dit.configs import TrainConfig, LoggingConfig, ModelConfig
+from dit.utils import get_scheduler_cls, Stopwatch, get_extra_optimizer, sample_discrete_timesteps
 from .sampling import Sampler, CFGSampler, to_wandb_batch
-from .validation import Validator, PickScorer
+from dit.validation import Validator, PickScorer, FIDScorer
 
 class Trainer:
     def __init__(self, config : TrainConfig, logging_config : LoggingConfig = None, model_config : ModelConfig = None):
@@ -168,6 +168,7 @@ class Trainer:
         if val_loader is not None:
             validator = Validator(self.accelerator.prepare(val_loader), self.config.batch_size * self.config.val_batch_mult)
         scorer = PickScorer(self.config.batch_size * self.config.val_batch_mult)
+        fid_scorer = FIDScorer(self.accelerator.prepare(val_loader), batch_size = self.config.batch_size * self.config.val_batch_mult)
 
         # Indices seperating shortcut batch
         sc_k_base = int((1 - self.model_config.sc_batch_frac) * self.config.batch_size)
@@ -238,9 +239,14 @@ class Trainer:
                         self.ema.ema_model.eval()
                         val_loss = validator(self.ema.ema_model)
                         pick_score = scorer(sampler, self.ema.ema_model)
+                        fid_score = fid_scorer(sampler, self.ema.ema_model)
+
+                        print(fid_score)
+                        exit()
                         self.ema.ema_model.train()
                         
                         wandb.log({
                             'validation_loss' : val_loss,
-                            'pick_score' : pick_score
+                            'pick_score' : pick_score,
+                            'fid' : fid_score
                         })
